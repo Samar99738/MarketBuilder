@@ -1,0 +1,10 @@
+{
+  "rules": [
+    "keep the fixes or changes concise, don't over-engineer",
+    "when can't fix an error , try to add logs to findout where the error is happening , so that i can run and give you the logs and you can follow",
+    "we are creating an mcp(model context protocol) server here",
+    "we will be using claude desktop app as the mcp client for now, that will use this server as context to perform some trades using these functions as the tools".,
+    "we are using aws free tier for deployment",
+    "say "hurra" always before starting the solution "
+  ]
+}
