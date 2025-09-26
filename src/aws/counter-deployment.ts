@@ -1,5 +1,4 @@
 // Real AWS deployment manager for counter functions
-
 import {
   LambdaClient,
   CreateFunctionCommand,
@@ -127,17 +126,17 @@ export class AWSCounterDeployment {
         const initResponse = await this.invokeLambda(functionName, {
           action: "initialize",
         });
-        awsLogger.info("✅ Counter initialized and started", {
+        awsLogger.info("Counter initialized and started", {
           metadata: { counterId, status: initResponse },
         });
       } catch (error) {
-        awsLogger.error("❌ Counter initialization failed", {
+        awsLogger.error("Counter initialization failed", {
           metadata: { counterId, error: (error as Error).message },
         });
         // Don't throw - deployment succeeded even if init failed
       }
 
-      awsLogger.info("✅ Counter deployment completed", {
+      awsLogger.info("Counter deployment completed", {
         metadata: { counterId, resourceArn: lambdaArn },
       });
 
@@ -190,7 +189,7 @@ export class AWSCounterDeployment {
         lambdaArn = functionInfo.Configuration?.FunctionArn;
         envVars = functionInfo.Configuration?.Environment?.Variables || {};
 
-        awsLogger.info("📋 Lambda function details", {
+        awsLogger.info("Lambda function details", {
           metadata: {
             counterId,
             state: functionInfo.Configuration?.State,
@@ -199,7 +198,7 @@ export class AWSCounterDeployment {
           },
         });
       } catch (error) {
-        awsLogger.error("❌ Failed to get function info", {
+        awsLogger.error("Failed to get function info", {
           metadata: { counterId, error: (error as Error).message },
         });
       }
@@ -208,7 +207,7 @@ export class AWSCounterDeployment {
       await this.getRecentLogs(functionName, counterId);
 
       // Invoke Lambda to get status
-      awsLogger.info("🚀 Invoking Lambda for status", {
+      awsLogger.info("Invoking Lambda for status", {
         metadata: { counterId },
       });
 
@@ -217,7 +216,7 @@ export class AWSCounterDeployment {
       });
       const status = JSON.parse(response.body || "{}");
 
-      awsLogger.info("📊 Lambda response received", {
+      awsLogger.info("Lambda response received", {
         metadata: { counterId, status },
       });
 
@@ -283,16 +282,16 @@ export class AWSCounterDeployment {
             )
             .join("\n") || "No log events found";
 
-        awsLogger.info("📝 Recent CloudWatch logs", {
+        awsLogger.info("Recent CloudWatch logs", {
           metadata: { counterId, functionName, logs: recentLogs },
         });
       } else {
-        awsLogger.warn("⚠️ No log streams found for function", {
+        awsLogger.warn("No log streams found for function", {
           metadata: { counterId, functionName, logGroupName },
         });
       }
     } catch (error) {
-      awsLogger.warn("⚠️ Could not fetch CloudWatch logs", {
+      awsLogger.warn("Could not fetch CloudWatch logs", {
         metadata: { counterId, error: (error as Error).message },
       });
     }
@@ -672,7 +671,7 @@ export class AWSCounterDeployment {
         });
 
         if (state === "Active") {
-          awsLogger.info("✅ Lambda function is now active", {
+          awsLogger.info("Lambda function is now active", {
             metadata: { counterId, waitTime: Date.now() - startTime },
           });
           return;
@@ -693,7 +692,7 @@ export class AWSCounterDeployment {
     }
 
     // Timeout reached
-    awsLogger.warn("⚠️ Lambda function did not become active within timeout", {
+    awsLogger.warn("Lambda function did not become active within timeout", {
       metadata: { counterId, waitTime: maxWaitTime },
     });
   }
@@ -786,18 +785,18 @@ exports.handler = async (event) => {
   const endTimeStr = process.env.COUNTER_END_TIME;
   const counterIdEnv = process.env.COUNTER_ID;
   
-  console.log('🔍 ENV DEBUG: startTime=' + startTimeStr + ', endTime=' + endTimeStr + ', counterId=' + counterIdEnv);
+  console.log('ENV DEBUG: startTime=' + startTimeStr + ', endTime=' + endTimeStr + ', counterId=' + counterIdEnv);
   
   // Parse environment variables
   let startTime = parseInt(startTimeStr || '0');
   let endTime = parseInt(endTimeStr || '0');
   
-  console.log('🔍 PARSED: startTime=' + startTime + ', endTime=' + endTime);
+  console.log('PARSED: startTime=' + startTime + ', endTime=' + endTime);
   
   // Validate environment variables - they should ALWAYS be set during deployment
   if (!startTime || startTime === 0 || !endTime || endTime === 0) {
-    console.log('❌ CRITICAL: Environment variables not set properly during deployment!');
-    console.log('❌ This indicates a deployment issue, not runtime initialization');
+    console.log('CRITICAL: Environment variables not set properly during deployment!');
+    console.log('This indicates a deployment issue, not runtime initialization');
     
     // Return error state instead of trying to initialize
     return {
@@ -833,7 +832,7 @@ exports.handler = async (event) => {
   const remainingTimeMs = Math.max(0, endTime - currentTime);
   const elapsedTimeMs = currentTime - startTime;
   
-  console.log('📊 SUCCESS: value=' + currentValue + ', running=' + isRunning + ', elapsed=' + elapsedSeconds + 's');
+  console.log('SUCCESS: value=' + currentValue + ', running=' + isRunning + ', elapsed=' + elapsedSeconds + 's');
   
   return {
     statusCode: 200,

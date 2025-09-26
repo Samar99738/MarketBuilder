@@ -21,10 +21,18 @@
     "build": "tsc",
     "start": "node dist/index.js",
     "dev": "ts-node src/index.ts",
+    
     "test": "node test-server.js",
     "test:counter": "node test-aws-counter.js",
+    
+    "deploy:dev": "node scripts/deploy.js development",
+    "deploy:prod": "node scripts/deploy.js production",
+    "deploy:staging": "node scripts/deploy.js staging",
+    
+    "env:init": "cp .env.example .env && echo 'Please configure .env file with your settings'",
+    "env:validate": "node -e \"require('./scripts/deploy.js').validateEnvironment(process.env.NODE_ENV || 'development')\"",
     "test:deploy": "node test-aws-deployment.js",
-    "clean": "rm -rf dist",
+    "clean": "rimraf dist",
     "prebuild": "npm run clean"
   },
   "dependencies": {
@@ -43,15 +51,18 @@
     "dotenv": "^16.3.1",
     "express": "^4.18.2",
     "jszip": "^3.10.1",
-    "socket.io": "^4.7.2",
+    "socket.io": "^4.8.1",
     "ws": "^8.18.2",
     "zod": "^3.22.4"
   },
   "devDependencies": {
     "@types/bs58": "^4.0.4",
-    "@types/express": "^4.17.21",
-    "@types/node": "^20.10.4",
+    "@types/dotenv": "^6.1.1",
+    "@types/express": "^4.17.23",
+    "@types/node": "^20.19.17",
+    "@types/socket.io": "^3.0.1",
     "@types/ws": "^8.18.1",
+    "rimraf": "^6.0.1",
     "ts-node": "^10.9.1",
     "typescript": "^5.3.3"
   }

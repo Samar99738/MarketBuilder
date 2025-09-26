@@ -6,11 +6,12 @@ import {
   buyTokens,
   sellTokens,
   getTokenPriceUSD,
-} from "../trading_utils/TokenUtils.js";
-import { strategyExecutionManager } from "../trading_utils/StrategyExecutionManager.js";
-import { awsLogger } from "../aws/logger.js";
-import { getAWSConfig } from "../aws/config.js";
-import { awsDeploymentManager } from "../aws/deployment.js";
+} from "../trading_utils/TokenUtils";
+import { strategyExecutionManager } from "../trading_utils/StrategyExecutionManager";
+import { performanceMonitor } from "../trading_utils/PerformanceOptimizer";
+import { awsLogger } from "../aws/logger";
+import { getAWSConfig } from "../aws/config";
+import { awsDeploymentManager } from "../aws/deployment";
 
 // Load environment variables
 dotenv.config();
@@ -90,6 +91,28 @@ app.get("/api/price", async (req, res) => {
     res.json({ price });
   } catch (error: any) {
     console.error("Error getting price:", error);
+    res.status(500).json({ error: error.message || "Internal server error" });
+  }
+});
+
+// Performance monitoring endpoint
+app.get("/api/performance", (req, res) => {
+  try {
+    const metrics = performanceMonitor.getMetrics();
+    res.json({
+      success: true,
+      performance: {
+        ...metrics,
+        successRate: metrics.transactionsSent > 0 
+          ? ((metrics.transactionsConfirmed / metrics.transactionsSent) * 100).toFixed(2) + '%'
+          : 'N/A',
+        transactionsPerMinute: metrics.uptimeMs > 0 
+          ? ((metrics.transactionsSent / (metrics.uptimeMs / 1000 / 60))).toFixed(2)
+          : '0.00'
+      }
+    });
+  } catch (error: any) {
+    console.error("Error getting performance metrics:", error);
     res.status(500).json({ error: error.message || "Internal server error" });
   }
 });

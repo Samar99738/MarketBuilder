@@ -880,5 +880,15 @@ rl.on("close", () => {
 // Keep the process alive
 setInterval(() => {}, 60000);
 
+// **START EXPRESS HTTP SERVER ALONGSIDE MCP SERVER**
+import('./server/server')
+  .then((serverModule) => {
+    serverModule.default.startServer();
+    process.stderr.write("✅ Express HTTP server started alongside MCP server\n");
+  })
+  .catch((error) => {
+    process.stderr.write(`❌ Failed to start Express server: ${error.message}\n`);
+  });
+
 // Log startup
 process.stderr.write("MCP server initialized and ready for messages\n");

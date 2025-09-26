@@ -15,6 +15,11 @@ import {
   BirdeyePriceResponse,
   DexscreenerPriceResponse,
 } from "./types";
+import {
+  calculateOptimalPriorityFee,
+  detectNetworkCongestion,
+  performanceMonitor
+} from "./PerformanceOptimizer";
 
 // Initialize wallet and connection with error handling
 let wallet: Keypair;
@@ -61,21 +66,113 @@ const PRICE_CACHE_TTL = 5000; // Reduced to 5 seconds for more frequent updates
 async function buyTokens(
   amountInSol: number = TRADING_CONFIG.BUY_AMOUNT_SOL
 ): Promise<string> {
+  const tradeStartTime = Date.now();
+  
   try {
-    const amountInLamports = amountInSol * LAMPORTS_PER_SOL;
-
-    const quoteResponse = await fetch(
-      `https://quote-api.jup.ag/v6/quote?inputMint=So11111111111111111111111111111111111111112&outputMint=${TRADING_CONFIG.TOKEN_ADDRESS}&amount=${amountInLamports}&slippageBps=${TRADING_CONFIG.SLIPPAGE_BPS}`
-    );
-    const quoteData = (await quoteResponse.json()) as JupiterQuoteResponse;
-
-    if (!quoteData || (!quoteData.data && !quoteData.outAmount)) {
-      throw new Error(`Failed to get quote: ${JSON.stringify(quoteData)}`);
+    // **MAINNET PERFORMANCE: Detect network conditions**
+    const networkStatus = await detectNetworkCongestion(connection);
+    console.log(`${networkStatus.recommendation}`);
+    
+    // **MAINNET PERFORMANCE: Calculate optimal priority fee**
+    const priorityFee = await calculateOptimalPriorityFee(connection, 'medium');
+    
+    // **MAINNET PERFORMANCE: Track transaction attempt**
+    performanceMonitor.recordTransactionSent();
+    
+    // **MAINNET SAFETY: Input validation**
+    if (!amountInSol || amountInSol <= 0) {
+      throw new Error(
+        `Invalid buy amount: ${amountInSol} SOL. Must be greater than 0.`
+      );
     }
 
-    let wrapUnwrapSol =
-      !quoteData.data?.swapMode || quoteData.data?.swapMode !== "ExactIn";
+    if (amountInSol < 0.001) {
+      throw new Error(
+        `Buy amount too small: ${amountInSol} SOL. Minimum is 0.001 SOL to cover transaction fees.`
+      );
+    }
 
+    // **MAINNET SAFETY: Check wallet balance before trading**
+    const walletBalance = await connection.getBalance(wallet.publicKey);
+    const walletBalanceSOL = walletBalance / LAMPORTS_PER_SOL;
+    
+    if (walletBalanceSOL < amountInSol + 0.01) { // Reserve 0.01 SOL for fees
+      throw new Error(
+        `Insufficient SOL balance. Required: ${amountInSol + 0.01} SOL (including fees), Available: ${walletBalanceSOL.toFixed(6)} SOL`
+      );
+    }
+
+    const amountInLamports = amountInSol * LAMPORTS_PER_SOL;
+    
+    // **MAINNET SAFETY: Quote request with timeout and retries**
+    let quoteData: JupiterQuoteResponse | undefined;
+    let retryCount = 0;
+    const maxRetries = 3;
+    
+    // **MAINNET PERFORMANCE: Use network-adjusted slippage**
+    const adjustedSlippage = Math.min(
+      networkStatus.suggestedSlippage,
+      TRADING_CONFIG.MAX_SLIPPAGE_BPS
+    );
+    
+    while (retryCount < maxRetries) {
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 10000); // 10s timeout
+        
+        const quoteResponse = await fetch(
+          `https://quote-api.jup.ag/v6/quote?inputMint=So11111111111111111111111111111111111111112&outputMint=${TRADING_CONFIG.TOKEN_ADDRESS}&amount=${amountInLamports}&slippageBps=${adjustedSlippage}`,
+          { signal: controller.signal }
+        );
+        
+        clearTimeout(timeoutId);
+        
+        if (!quoteResponse.ok) {
+          throw new Error(`Quote API error: ${quoteResponse.status} ${quoteResponse.statusText}`);
+        }
+        
+        quoteData = (await quoteResponse.json()) as JupiterQuoteResponse;
+        break;
+        
+      } catch (error: any) {
+        retryCount++;
+        if (error.name === 'AbortError') {
+          console.warn(`⏱️ Quote request timeout (attempt ${retryCount}/${maxRetries})`);
+        } else {
+          console.warn(`🔄 Quote request failed (attempt ${retryCount}/${maxRetries}):`, error.message);
+        }
+        
+        if (retryCount >= maxRetries) {
+          throw new Error(
+            `Failed to get trading quote after ${maxRetries} attempts. This may be due to network issues or high slippage. Please try again with higher slippage tolerance.`
+          );
+        }
+        
+        // Wait before retry (exponential backoff)
+        await new Promise(resolve => setTimeout(resolve, Math.pow(2, retryCount) * 1000));
+      }
+    }
+
+    if (!quoteData || (!quoteData.data && !quoteData.outAmount)) {
+      throw new Error(
+        `No trading route found. This token may have low liquidity or be untradeable. Quote response: ${JSON.stringify(quoteData || {}).substring(0, 200)}...`
+      );
+    }
+
+    // **MAINNET SAFETY: Validate quote makes sense**
+    const expectedTokens = quoteData.outAmount || quoteData.data?.outAmount;
+    if (!expectedTokens || expectedTokens === '0') {
+      throw new Error(
+        `Invalid quote: Would receive 0 tokens for ${amountInSol} SOL. Check token address and liquidity.`
+      );
+    }
+
+    let wrapUnwrapSol = !quoteData.data?.swapMode || quoteData.data?.swapMode !== "ExactIn";
+
+    // **MAINNET SAFETY: Swap request with timeout and validation**
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 15000); // 15s timeout
+    
     const swapResponse = await fetch("https://quote-api.jup.ag/v6/swap", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -83,39 +180,152 @@ async function buyTokens(
         quoteResponse: quoteData.data || quoteData,
         userPublicKey: wallet.publicKey.toString(),
         wrapAndUnwrapSol: wrapUnwrapSol,
+        dynamicComputeUnitLimit: TRADING_CONFIG.DYNAMIC_COMPUTE_UNIT_LIMIT,
+        prioritizationFeeLamports: priorityFee, // Use optimized priority fee
       }),
+      signal: controller.signal,
     });
+    
+    clearTimeout(timeoutId);
+    
+    if (!swapResponse.ok) {
+      throw new Error(
+        `Swap transaction preparation failed: ${swapResponse.status} ${swapResponse.statusText}`
+      );
+    }
 
     const swapData = (await swapResponse.json()) as JupiterSwapResponse;
+    
+    if (!swapData.swapTransaction) {
+      throw new Error(
+        `Invalid swap transaction received. Please try again.`
+      );
+    }
+    
     const transaction = VersionedTransaction.deserialize(
       Buffer.from(swapData.swapTransaction, "base64")
     );
 
     transaction.sign([wallet]);
-    const signature = await connection.sendTransaction(transaction);
-
-    const { blockhash, lastValidBlockHeight } =
-      await connection.getLatestBlockhash();
-    const confirmation = await connection.confirmTransaction({
-      signature,
-      blockhash,
-      lastValidBlockHeight,
-    });
-
-    if (confirmation.value.err) {
-      throw new Error(`Transaction failed: ${confirmation.value.err}`);
+    
+    // **MAINNET SAFETY: Send transaction with retry logic**
+    let signature: string | undefined;
+    let sendRetries = 0;
+    const maxSendRetries = 3;
+    
+    while (sendRetries < maxSendRetries) {
+      try {
+        signature = await connection.sendTransaction(transaction, {
+          maxRetries: 3,
+          preflightCommitment: 'processed',
+          skipPreflight: false,
+        });
+        break;
+      } catch (error: any) {
+        sendRetries++;
+        console.warn(`Transaction send failed (attempt ${sendRetries}/${maxSendRetries}):`, error.message);
+        
+        if (sendRetries >= maxSendRetries) {
+          throw new Error(
+            `Failed to send transaction after ${maxSendRetries} attempts: ${error.message}`
+          );
+        }
+        
+        // Wait before retry
+        await new Promise(resolve => setTimeout(resolve, 2000 * sendRetries));
+      }
+    }
+    
+    if (!signature) {
+      throw new Error('Failed to get transaction signature');
     }
 
+    // **MAINNET SAFETY: Robust transaction confirmation with timeout**
+    const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
+    
+    const startTime = Date.now();
+    const confirmationTimeout = 60000; // 60 seconds
+    
+    let confirmed = false;
+    while (Date.now() - startTime < confirmationTimeout && !confirmed) {
+      try {
+        const confirmation = await connection.confirmTransaction({
+          signature,
+          blockhash,
+          lastValidBlockHeight,
+        }, 'confirmed');
+
+        if (confirmation.value.err) {
+          throw new Error(
+            `Transaction failed on-chain: ${JSON.stringify(confirmation.value.err)}`
+          );
+        }
+        
+        confirmed = true;
+        
+      } catch (confirmError: any) {
+        if (confirmError.message.includes('Transaction failed')) {
+          throw confirmError; // Re-throw transaction failure errors immediately
+        }
+        
+        // For other errors, wait and retry
+        await new Promise(resolve => setTimeout(resolve, 2000));
+      }
+    }
+    
+    if (!confirmed) {
+      throw new Error(
+        `Transaction confirmation timeout after 60 seconds. Transaction may still succeed. Signature: ${signature}`
+      );
+    }
+
+    // **MAINNET PERFORMANCE: Record successful transaction**
+    const tradeLatency = Date.now() - tradeStartTime;
+    performanceMonitor.recordTransactionConfirmed(tradeLatency);
+
+    process.stderr.write(
+      `Buy successful: ${amountInSol} SOL → ${(parseInt(expectedTokens) / Math.pow(10, 6)).toLocaleString()} tokens. Signature: ${signature} (${tradeLatency}ms)\n`
+    );
+    
     return signature;
-  } catch (error) {
-    console.error("Error in buyTokens:", error);
-    throw error; // Re-throw error for proper handling
+    
+  } catch (error: any) {
+    // **MAINNET PERFORMANCE: Record failed transaction**
+    performanceMonitor.recordTransactionFailed();
+    
+    // **USER-FRIENDLY ERROR CATEGORIZATION**
+    let userMessage = error.message;
+    
+    if (error.name === 'AbortError') {
+      userMessage = "Request timeout. Please check your internet connection and try again.";
+    } else if (error.message.includes('insufficient funds')) {
+      userMessage = "Insufficient SOL balance. Please add more SOL to your wallet.";
+    } else if (error.message.includes('slippage')) {
+      userMessage = "Price moved too much (slippage exceeded). Try increasing slippage tolerance or reducing trade size.";
+    } else if (error.message.includes('fetch')) {
+      userMessage = "Network connection error. Please check your internet and try again.";
+    }
+    
+    console.error("Buy transaction failed:", userMessage);
+    throw new Error(userMessage);
   }
 }
 
 // Sell tokens using Jupiter
 async function sellTokens(amountToSell: number | null = null): Promise<string> {
+  const tradeStartTime = Date.now();
+  
   try {
+    // **MAINNET PERFORMANCE: Detect network conditions**
+    const networkStatus = await detectNetworkCongestion(connection);
+    console.log(`${networkStatus.recommendation}`);
+    
+    // **MAINNET PERFORMANCE: Calculate optimal priority fee**
+    const priorityFee = await calculateOptimalPriorityFee(connection, 'medium');
+    
+    // **MAINNET PERFORMANCE: Track transaction attempt**
+    performanceMonitor.recordTransactionSent();
+    
     // Require explicit amount - don't sell anything if no amount specified
     if (amountToSell === null || amountToSell === undefined) {
       throw new Error(
@@ -170,9 +380,15 @@ async function sellTokens(amountToSell: number | null = null): Promise<string> {
     }
 
     const sellAmount = Math.floor(tokensToSell * 10 ** tokenDecimals);
+    
+    // **MAINNET PERFORMANCE: Use network-adjusted slippage**
+    const adjustedSlippage = Math.min(
+      networkStatus.suggestedSlippage,
+      TRADING_CONFIG.MAX_SLIPPAGE_BPS
+    );
 
     const quoteResponse = await fetch(
-      `https://quote-api.jup.ag/v6/quote?inputMint=${TRADING_CONFIG.TOKEN_ADDRESS}&outputMint=So11111111111111111111111111111111111111112&amount=${sellAmount}&slippageBps=${TRADING_CONFIG.SLIPPAGE_BPS}`
+      `https://quote-api.jup.ag/v6/quote?inputMint=${TRADING_CONFIG.TOKEN_ADDRESS}&outputMint=So11111111111111111111111111111111111111112&amount=${sellAmount}&slippageBps=${adjustedSlippage}`
     );
     const quoteData = (await quoteResponse.json()) as JupiterQuoteResponse;
 
@@ -188,7 +404,7 @@ async function sellTokens(amountToSell: number | null = null): Promise<string> {
         userPublicKey: wallet.publicKey.toString(),
         wrapAndUnwrapSol: true,
         dynamicComputeUnitLimit: TRADING_CONFIG.DYNAMIC_COMPUTE_UNIT_LIMIT,
-        prioritizationFeeLamports: TRADING_CONFIG.PRIORITY_FEE_LAMPORTS,
+        prioritizationFeeLamports: priorityFee, // Use optimized priority fee
       }),
     });
 
@@ -212,8 +428,17 @@ async function sellTokens(amountToSell: number | null = null): Promise<string> {
       throw new Error(`Transaction failed: ${confirmation.value.err}`);
     }
 
+    // **MAINNET PERFORMANCE: Record successful transaction**
+    const tradeLatency = Date.now() - tradeStartTime;
+    performanceMonitor.recordTransactionConfirmed(tradeLatency);
+    
+    console.log(`Sell successful: ${tokensToSell.toLocaleString()} tokens → SOL. Signature: ${signature} (${tradeLatency}ms)`);
+
     return signature;
   } catch (error) {
+    // **MAINNET PERFORMANCE: Record failed transaction**
+    performanceMonitor.recordTransactionFailed();
+    
     console.error("Error in sellTokens:", error);
     throw error; // Re-throw error for proper handling
   }
@@ -531,7 +756,7 @@ export {
   buyTokens,
   sellTokens,
   getTokenPriceUSD,
-  getJupiterTokenPrice, // For trading consistency
+  getJupiterTokenPrice, // for trading consistency
   getSolPriceUSD,
   waitForPriceAbove,
   waitForPriceBelow,

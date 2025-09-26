@@ -19,8 +19,7 @@ export interface JupiterPriceResponse {
     [key: string]: {
       price: number;
     };
-  };
-}
+  };}
 
 export interface BirdeyePriceResponse {
   data: {
