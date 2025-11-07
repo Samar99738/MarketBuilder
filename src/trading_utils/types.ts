@@ -1,4 +1,8 @@
-// Jupiter API types
+// ============================================================================
+// JUPITER DEX API TYPES
+// ============================================================================
+
+/** Response from Jupiter quote API - provides swap route information */
 export interface JupiterQuoteResponse {
   data?: {
     swapMode?: string;

@@ -1,0 +1,239 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../node_modules/.prisma/client"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================
+// USER MANAGEMENT
+// ============================================
+
+model User {
+  id            String   @id @default(uuid())
+  email         String   @unique
+  username      String   @unique
+  passwordHash  String   @map("password_hash")
+  role          UserRole @default(TRADER)
+  apiKeys       String[] @map("api_keys")
+  isActive      Boolean  @default(true) @map("is_active")
+  walletAddress String?  @map("wallet_address")
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  strategies            Strategy[]
+  trades                Trade[]
+  paperTradingSessions  PaperTradingSession[]
+  auditLogs             AuditLog[]
+
+  @@map("users")
+}
+
+enum UserRole {
+  ADMIN
+  TRADER
+  VIEWER
+  API_USER
+}
+
+// ============================================
+// STRATEGY MANAGEMENT
+// ============================================
+
+model Strategy {
+  id          String         @id @default(uuid())
+  userId      String         @map("user_id")
+  name        String
+  description String?
+  config      Json           // Store strategy configuration as JSON
+  status      StrategyStatus @default(DRAFT)
+  template    String?        // Strategy template type (e.g., 'dca', 'scalping')
+  createdAt   DateTime       @default(now()) @map("created_at")
+  updatedAt   DateTime       @updatedAt @map("updated_at")
+
+  // Relations
+  user                  User                  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  trades                Trade[]
+  executionLogs         ExecutionLog[]
+  paperTradingSessions  PaperTradingSession[]
+
+  @@index([userId])
+  @@index([status])
+  @@map("strategies")
+}
+
+enum StrategyStatus {
+  DRAFT
+  ACTIVE
+  PAUSED
+  STOPPED
+  ERROR
+}
+
+// ============================================
+// TRADING & EXECUTION
+// ============================================
+
+model Trade {
+  id         String    @id @default(uuid())
+  sessionId  String?   @map("session_id") // Paper trading session or live session
+  userId     String    @map("user_id")
+  strategyId String?   @map("strategy_id")
+  type       TradeType
+  tokenAddress String  @map("token_address")
+  amountSOL  Float     @map("amount_sol")
+  amountTokens Float   @map("amount_tokens")
+  price      Float     // Execution price
+  priceUSD   Float     @map("price_usd")
+  total      Float     // Total value
+  fee        Float     // Trading fees
+  slippage   Float     @default(0)
+  profitLoss Float?    @map("profit_loss")
+  profitLossUSD Float? @map("profit_loss_usd")
+  metadata   Json?     // Additional trade data
+  signature  String?   // Transaction signature (for live trades)
+  isPaper    Boolean   @default(false) @map("is_paper") // Is this a paper trade?
+  trigger    String?   // What triggered this trade
+  createdAt  DateTime  @default(now()) @map("created_at")
+
+  // Relations
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  strategy Strategy? @relation(fields: [strategyId], references: [id], onDelete: SetNull)
+
+  @@index([sessionId])
+  @@index([userId])
+  @@index([strategyId])
+  @@index([createdAt])
+  @@index([isPaper])
+  @@map("trades")
+}
+
+enum TradeType {
+  BUY
+  SELL
+}
+
+// ============================================
+// PAPER TRADING
+// ============================================
+
+model PaperTradingSession {
+  id                String        @id @default(uuid())
+  userId            String        @map("user_id")
+  strategyId        String?       @map("strategy_id")
+  name              String?
+  initialBalanceSOL Float         @map("initial_balance_sol")
+  initialBalanceUSDC Float        @default(0) @map("initial_balance_usdc")
+  currentBalanceSOL Float         @map("current_balance_sol")
+  currentBalanceUSDC Float        @default(0) @map("current_balance_usdc")
+  balanceTokens     Float         @default(0) @map("balance_tokens")
+  tokenAddress      String        @map("token_address")
+  status            SessionStatus @default(ACTIVE)
+  totalPnL          Float         @default(0) @map("total_pnl")
+  totalPnLUSD       Float         @default(0) @map("total_pnl_usd")
+  realizedPnL       Float         @default(0) @map("realized_pnl")
+  realizedPnLUSD    Float         @default(0) @map("realized_pnl_usd")
+  unrealizedPnL     Float         @default(0) @map("unrealized_pnl")
+  unrealizedPnLUSD  Float         @default(0) @map("unrealized_pnl_usd")
+  roi               Float         @default(0) // Return on investment %
+  totalValueUSD     Float         @default(0) @map("total_value_usd")
+  tradeCount        Int           @default(0) @map("trade_count")
+  winRate           Float         @default(0) @map("win_rate")
+  metadata          Json?         // Additional session data
+  startedAt         DateTime      @default(now()) @map("started_at")
+  endedAt           DateTime?     @map("ended_at")
+  createdAt         DateTime      @default(now()) @map("created_at")
+  updatedAt         DateTime      @updatedAt @map("updated_at")
+
+  // Relations
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  strategy Strategy? @relation(fields: [strategyId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([strategyId])
+  @@index([status])
+  @@map("paper_trading_sessions")
+}
+
+enum SessionStatus {
+  ACTIVE
+  PAUSED
+  COMPLETED
+  CANCELLED
+}
+
+// ============================================
+// EXECUTION LOGS
+// ============================================
+
+model ExecutionLog {
+  id         String   @id @default(uuid())
+  strategyId String   @map("strategy_id")
+  runningId  String   @map("running_id") // Unique ID for this strategy execution instance
+  step       String
+  status     LogStatus
+  message    String   @db.Text
+  metadata   Json?
+  duration   Int?     // Execution duration in ms
+  timestamp  DateTime @default(now())
+
+  // Relations
+  strategy Strategy @relation(fields: [strategyId], references: [id], onDelete: Cascade)
+
+  @@index([strategyId])
+  @@index([runningId])
+  @@index([timestamp])
+  @@map("execution_logs")
+}
+
+enum LogStatus {
+  INFO
+  SUCCESS
+  WARNING
+  ERROR
+}
+
+// ============================================
+// AUDIT LOGS
+// ============================================
+
+model AuditLog {
+  id           String   @id @default(uuid())
+  userId       String?  @map("user_id")
+  action       String   // e.g., 'strategy.created', 'trade.executed'
+  resourceType String?  @map("resource_type") // e.g., 'strategy', 'trade'
+  resourceId   String?  @map("resource_id")
+  details      Json?    // Additional details
+  ipAddress    String?  @map("ip_address")
+  userAgent    String?  @map("user_agent") @db.Text
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  // Relations
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([action])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+// ============================================
+// SYSTEM CONFIGURATION (Optional)
+// ============================================
+
+model SystemConfig {
+  id        String   @id @default(uuid())
+  key       String   @unique
+  value     Json
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@map("system_config")
+}

@@ -16,9 +16,9 @@ export type Environment = 'development' | 'production' | 'staging' | 'test';
 export interface EnvironmentConfig {
   // Environment
   NODE_ENV: Environment;
-  
-  // Security
-  WALLET_PRIVATE_KEY: string;
+
+  // Security (optional when MPC is enabled)
+  WALLET_PRIVATE_KEY?: string;
   WEBHOOK_SECRET?: string;
   
   // Network
@@ -61,17 +61,17 @@ export function loadEnvironmentConfig(): EnvironmentConfig {
   // Determine environment
   const env = (process.env.NODE_ENV || 'development') as Environment;
   
-  console.log(`🔧 Loading configuration for environment: ${env}`);
+  console.error(`Loading configuration for environment: ${env}`);
   
   // Load environment-specific .env file
   const envFile = `.env.${env}`;
   const envPath = path.resolve(process.cwd(), envFile);
   
   if (fs.existsSync(envPath)) {
-    console.log(`Loading environment config from: ${envFile}`);
+    console.error(`Loading environment config from: ${envFile}`);
     dotenv.config({ path: envPath });
   } else {
-    console.warn(`Environment file ${envFile} not found, using .env`);
+    console.error(`Environment file ${envFile} not found, using .env`);
   }
   
   // Also load .env as fallback
@@ -82,16 +82,16 @@ export function loadEnvironmentConfig(): EnvironmentConfig {
     // Environment
     NODE_ENV: env,
     
-    // Security
-    WALLET_PRIVATE_KEY: getRequiredEnv('WALLET_PRIVATE_KEY'),
+    // Security (optional when MPC is enabled)
+    WALLET_PRIVATE_KEY: process.env.MPC_ENABLED === 'true' ? process.env.WALLET_PRIVATE_KEY : getRequiredEnv('WALLET_PRIVATE_KEY'),
     WEBHOOK_SECRET: process.env.WEBHOOK_SECRET,
     
     // Network
     RPC_ENDPOINT: getRequiredEnv('RPC_ENDPOINT'),
     WS_ENDPOINT: process.env.WS_ENDPOINT,
     
-    // Trading
-    TOKEN_ADDRESS: getRequiredEnv('TOKEN_ADDRESS'),
+    // Trading (TOKEN_ADDRESS optional in MCP mode, will be provided per-tool call)
+    TOKEN_ADDRESS: process.env.TOKEN_ADDRESS || 'So11111111111111111111111111111111111111112', // Default to SOL
     BUY_AMOUNT_SOL: parseFloat(process.env.BUY_AMOUNT_SOL || '0.1'),
     SLIPPAGE_BPS: parseInt(process.env.SLIPPAGE_BPS || '300'),
     MAX_SLIPPAGE_BPS: parseInt(process.env.MAX_SLIPPAGE_BPS || '1000'),
@@ -147,15 +147,18 @@ function getRequiredEnv(key: string): string {
 function validateConfiguration(config: EnvironmentConfig): void {
   const errors: string[] = [];
   
-  // Validate wallet private key format
-  if (config.WALLET_PRIVATE_KEY === 'your_base58_private_key_here' || 
-      config.WALLET_PRIVATE_KEY === 'your_wallet_private_key_here') {
-    errors.push('WALLET_PRIVATE_KEY must be set to your actual private key (not the placeholder)');
+  // Validate wallet private key format (only when MPC is disabled)
+  if (process.env.MPC_ENABLED !== 'true') {
+    if (!config.WALLET_PRIVATE_KEY ||
+        config.WALLET_PRIVATE_KEY === 'your_base58_private_key_here' ||
+        config.WALLET_PRIVATE_KEY === 'your_wallet_private_key_here') {
+      errors.push('WALLET_PRIVATE_KEY must be set to your actual private key (not the placeholder)');
+    }
   }
   
   // Validate token address
   if (config.TOKEN_ADDRESS.length !== 44) {
-    console.warn('TOKEN_ADDRESS might not be a valid Solana address (expected 44 characters)');
+    console.error('TOKEN_ADDRESS might not be a valid Solana address (expected 44 characters)');
   }
   
   // Validate RPC endpoint
@@ -183,25 +186,25 @@ function validateConfiguration(config: EnvironmentConfig): void {
     }
     
     if (!config.ENABLE_RATE_LIMITING) {
-      console.warn('Rate limiting is disabled in production. Consider enabling for security.');
+      console.error('Rate limiting is disabled in production. Consider enabling for security.');
     }
     
     if (config.BUY_AMOUNT_SOL > 1) {
-      console.warn('BUY_AMOUNT_SOL is quite large for production. Please verify this is intentional.');
+      console.error('BUY_AMOUNT_SOL is quite large for production. Please verify this is intentional.');
     }
   }
   
   // Development-specific recommendations
   if (config.NODE_ENV === 'development') {
     if (!config.RPC_ENDPOINT.includes('devnet')) {
-      console.warn('Development environment is using mainnet. Consider using devnet for safety.');
+      console.error('Development environment is using mainnet. Consider using devnet for safety.');
     }
   }
   
   // Throw errors if validation failed
   if (errors.length > 0) {
     throw new Error(
-      `Configuration validation failed:\n${errors.map(e => `  • ${e}`).join('\n')}`
+      `Configuration validation failed:\n${errors.map(e => `  â€¢ ${e}`).join('\n')}`
     );
   }
 }
@@ -220,17 +223,17 @@ function logConfiguration(config: EnvironmentConfig): void {
     ENABLE_PERFORMANCE_MONITORING: config.ENABLE_PERFORMANCE_MONITORING,
     LOG_LEVEL: config.LOG_LEVEL,
     ENABLE_RATE_LIMITING: config.ENABLE_RATE_LIMITING,
-    WALLET_INITIALIZED: config.WALLET_PRIVATE_KEY ? 'Yes' : 'No',
+    WALLET_INITIALIZED: config.WALLET_PRIVATE_KEY ? 'Yes' : (process.env.MPC_ENABLED === 'true' ? 'MPC Mode' : 'No'),
   };
   
-  console.log('🔧 Configuration loaded:');
-  console.table(safeConfig);
+  console.error('Configuration loaded:');
+  console.error(safeConfig);
   
   // Environment-specific notices
   if (config.NODE_ENV === 'production') {
-    console.log('PRODUCTION MODE: Trading with real money on mainnet!');
+    console.error('PRODUCTION MODE: Trading with real money on mainnet!');
   } else if (config.NODE_ENV === 'development') {
-    console.log('DEVELOPMENT MODE: Safe testing environment');
+    console.error('DEVELOPMENT MODE: Safe testing environment');
   }
 }
 
@@ -259,4 +262,16 @@ export function isSafeEnvironment(config: EnvironmentConfig): boolean {
 }
 
 // Global configuration instance
-export const ENV_CONFIG = loadEnvironmentConfig();
+// Global configuration instance - lazy load in MCP mode
+let _cachedConfig: EnvironmentConfig | null = null;
+
+export function getEnvConfig(): EnvironmentConfig {
+  if (!_cachedConfig) {
+    _cachedConfig = loadEnvironmentConfig();
+  }
+  return _cachedConfig;
+}
+
+export const ENV_CONFIG = process.env.MCP_MODE === 'true' 
+  ? null as any as EnvironmentConfig
+  : loadEnvironmentConfig();

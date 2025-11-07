@@ -1,0 +1,54 @@
+═══════════════════════════════════════════════════════
+  🚨 IMPORTANT: Server Must Be Rebuilt & Restarted!
+═══════════════════════════════════════════════════════
+
+YOUR SERVER IS RUNNING OLD CODE!
+--------------------------------
+
+The server runs from dist/src/server/server.js (compiled JavaScript).
+The TypeScript changes we made are in src/ folder but NOT compiled yet.
+
+🔧 WHAT TO DO:
+--------------
+
+Step 1: Stop the current server
+   Press Ctrl+C in the terminal running the server
+
+Step 2: Rebuild TypeScript code
+   Run: npm run build
+   
+Step 3: Start server with NEW code
+   Run: npm start
+
+Step 4: Test the fix
+   Run: node test-fresh-session.js
+
+═══════════════════════════════════════════════════════
+
+💡 WHAT WE FIXED:
+-----------------
+
+1. ✅ Added "isFreshSession" flag to prevent cached data
+2. ✅ Skip old conversation history for fresh sessions  
+3. ✅ Post-process AI responses to replace $231.50
+4. ✅ Fetch real-time SOL price from TokenUtils
+5. ✅ Add explicit price warnings in system prompt
+
+The fix will:
+- Detect when AI returns $231.50 (cached price)
+- Automatically replace it with real-time price
+- Log the correction in console
+
+═══════════════════════════════════════════════════════
+
+🎯 QUICK COMMANDS:
+------------------
+
+# In terminal running server (press Ctrl+C first):
+npm run build
+npm start
+
+# In another terminal:
+node test-fresh-session.js
+
+═══════════════════════════════════════════════════════

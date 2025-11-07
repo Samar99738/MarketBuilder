@@ -1,0 +1,42 @@
+{
+  "id": "persist-test-1",
+  "name": "Persist Test",
+  "description": "Test strategy persistence",
+  "steps": [
+    {
+      "id": "buy_1",
+      "type": "buy",
+      "amountInSol": 0.001,
+      "description": "Buy 0.001 SOL (DCA step 1)"
+    }
+  ],
+  "startStepId": "buy_1",
+  "variables": {},
+  "riskLimits": {
+    "maxPositionSizeSOL": 1,
+    "maxDailyLossSOL": 0.5,
+    "maxConcurrentTrades": 3,
+    "stopLossPercentage": 20,
+    "takeProfitPercentage": 50,
+    "cooldownPeriodMs": 300000
+  },
+  "status": {
+    "isActive": false,
+    "isPaused": false,
+    "executionCount": 0,
+    "totalRuntime": 0
+  },
+  "metrics": {
+    "totalTrades": 0,
+    "successfulTrades": 0,
+    "totalPnL": 0,
+    "winRate": 0,
+    "averageTradeTime": 0,
+    "maxDrawdown": 0,
+    "lastExecuted": 0
+  },
+  "createdAt": 1762140423840,
+  "updatedAt": 1762140423845,
+  "version": "1.0.0",
+  "isProduction": false
+}

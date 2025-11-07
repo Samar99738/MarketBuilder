@@ -1,0 +1,106 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database (NOW ALWAYS ACTIVE)
+  postgres:
+    image: postgres:14-alpine
+    container_name: trading_db
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: trading_platform
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: password
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - trading-network
+
+  # Redis for caching and sessions (NOW ALWAYS ACTIVE)
+  redis:
+    image: redis:7-alpine
+    container_name: trading_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    restart: unless-stopped
+    networks:
+      - trading-network
+
+  # Your Trading Server (commented out for now until database is integrated)
+  # Uncomment this after you've integrated the database into your server code
+  # trading-server:
+  #   build: .
+  #   ports:
+  #     - "3000:3000"
+  #   environment:
+  #     # Database
+  #     - DATABASE_URL=postgresql://postgres:password@postgres:5432/trading_platform?schema=public
+  #     - REDIS_URL=redis://redis:6379
+  #     
+  #     # MPC Configuration
+  #     - MPC_ENABLED=${MPC_ENABLED:-false}
+  #     - MPC_PROVIDER=${MPC_PROVIDER:-mock}
+  #     - MPC_WALLET_ID=${MPC_WALLET_ID}
+  #     - MPC_API_KEY=${MPC_API_KEY}
+  #     - MPC_API_SECRET=${MPC_API_SECRET}
+  #     - MPC_API_URL=${MPC_API_URL}
+  #     - MPC_SIGNATURE_THRESHOLD=${MPC_SIGNATURE_THRESHOLD:-2}
+  #     - MPC_TOTAL_PARTIES=${MPC_TOTAL_PARTIES:-3}
+  #     - MPC_APPROVAL_THRESHOLD_SOL=${MPC_APPROVAL_THRESHOLD_SOL:-1.0}
+  #     - MPC_AUTO_APPROVE_SOL=${MPC_AUTO_APPROVE_SOL:-0.1}
+  #
+  #     # Trading Configuration
+  #     - TOKEN_ADDRESS=${TOKEN_ADDRESS}
+  #     - BUY_AMOUNT_SOL=${BUY_AMOUNT_SOL:-0.1}
+  #     - MIN_SELL_AMOUNT=${MIN_SELL_AMOUNT:-1000}
+  #     - SLIPPAGE_BPS=${SLIPPAGE_BPS:-50}
+  #     - MAX_SLIPPAGE_BPS=${MAX_SLIPPAGE_BPS:-300}
+  #     - RPC_ENDPOINT=${RPC_ENDPOINT:-https://api.mainnet-beta.solana.com}
+  #
+  #     # Advanced Configuration
+  #     - DYNAMIC_COMPUTE_UNIT_LIMIT=${DYNAMIC_COMPUTE_UNIT_LIMIT:-true}
+  #     - PRIORITY_FEE_LAMPORTS=${PRIORITY_FEE_LAMPORTS:-5000}
+  #     - ENABLE_DYNAMIC_FEES=${ENABLE_DYNAMIC_FEES:-true}
+  #     - MAX_POSITION_SIZE_SOL=${MAX_POSITION_SIZE_SOL:-10}
+  #     - STOP_LOSS_PERCENTAGE=${STOP_LOSS_PERCENTAGE:-5}
+  #     - BATCH_TRANSACTIONS=${BATCH_TRANSACTIONS:-false}
+  #     - PARALLEL_EXECUTION=${PARALLEL_EXECUTION:-true}
+  #
+  #     # Server Configuration
+  #     - NODE_ENV=production
+  #     - PORT=3000
+  #
+  #   volumes:
+  #     - mpc-credentials:/app/mpc-credentials:ro
+  #     - logs:/app/logs
+  #
+  #   depends_on:
+  #     - postgres
+  #     - redis
+  #
+  #   restart: unless-stopped
+  #   networks:
+  #     - trading-network
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  mpc-credentials:
+    driver: local
+  logs:
+    driver: local
+
+networks:
+  trading-network:
+    driver: bridge

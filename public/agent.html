@@ -1,0 +1,3500 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Trading Agent - Solana Strategy Builder</title>
+
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
+    <!-- Phantom Wallet Adapter -->
+    <script src="https://unpkg.com/@solana/web3.js@latest/lib/index.iife.min.js"></script>
+
+    <!-- Socket.IO Client -->
+    <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
+
+    <!-- Jupiter Plugin -->
+    <script src="https://plugin.jup.ag/plugin-v1.js" data-preload defer></script>
+
+    <!-- External CSS with cache-busting version parameter -->
+    <link rel="stylesheet" href="agent.css?v=4" />
+
+</head>
+
+<body>
+    <div class="app-container">
+        <!-- Sidebar -->
+        <div class="sidebar">
+            <div class="sidebar-header">
+                <h1>AI Trading Agent</h1>
+                <p>Powered by Gemini AI</p>
+            </div>
+
+            <button class="new-chat-btn" onclick="startNewChat()">
+                ➕ New Strategy Chat
+            </button>
+
+            <!-- Wallet Section -->
+            <div class="wallet-section">
+                <h3 style="font-size: 14px; margin-bottom: 12px;">💼 Phantom Wallet</h3>
+
+                <div class="wallet-status">
+                    <span class="status-indicator" id="walletStatusIndicator"></span>
+                    <span id="walletStatusText">Not Connected</span>
+                </div>
+
+                <div id="walletDetails" style="display: none;">
+                    <div class="wallet-address" id="walletAddress" onclick="openWalletOnSolscan()"
+                        title="Click to view on Solscan"></div>
+                    <div class="wallet-balance" id="walletBalance">0 SOL</div>
+                </div>
+
+                <button class="connect-wallet-btn" id="connectWalletBtn" onclick="connectPhantomWallet()">
+                    Connect Phantom Wallet
+                </button>
+                <button class="disconnect-wallet-btn" id="disconnectWalletBtn" onclick="disconnectWallet()"
+                    style="display: none; margin-top: 8px;">
+                    Disconnect
+                </button>
+
+                <!-- Jupiter DEX Swap Button -->
+                <button class="jupiter-swap-btn" id="jupiterSwapBtn" onclick="openJupiterSwap()"
+                    style="display: none; margin-top: 12px;">
+                    ⚡ Jupiter DEX Swap
+                </button>
+            </div>
+
+            <!-- Paper Trading Toggle Section -->
+            <div class="paper-trading-section" style="margin-top: 24px;">
+                <h3 style="font-size: 14px; margin-bottom: 12px;">📊 Trading Mode</h3>
+
+                <div class="paper-trading-toggle-card">
+                    <div class="toggle-container">
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="paperTradingMode" checked onchange="handleTradingModeChange()">
+                            <span class="toggle-slider"></span>
+                        </label>
+                        <div class="toggle-label">
+                            <span style="font-weight: 600;">Paper Trading Mode</span>
+                            <span
+                                style="font-size: 11px; color: var(--text-secondary); display: block; margin-top: 2px;">
+                                Safe testing with virtual funds
+                            </span>
+                        </div>
+                    </div>
+
+                    <div class="mode-indicator-container">
+                        <span class="mode-badge paper-badge" id="paperBadge">
+                            📊 PAPER MODE
+                        </span>
+                        <span class="mode-badge live-badge" id="liveBadge" style="display: none;">
+                            🔴 LIVE TRADING
+                        </span>
+                    </div>
+
+                    <!-- Paper Trading Metrics -->
+                    <div class="paper-metrics" id="paperMetrics" style="margin-top: 12px;">
+                        <div class="metric-row">
+                            <span class="metric-label">Virtual Balance:</span>
+                            <span class="metric-value" id="paperBalance">10.00 SOL</span>
+                        </div>
+                        <div class="metric-row">
+                            <span class="metric-label">Total P&L:</span>
+                            <span class="metric-value profit" id="paperPnL">+0.00 SOL</span>
+                        </div>
+                        <div class="metric-row">
+                            <span class="metric-label">ROI:</span>
+                            <span class="metric-value" id="paperROI">0.00%</span>
+                        </div>
+                        <div class="metric-row">
+                            <span class="metric-label">Trades:</span>
+                            <span class="metric-value" id="paperTrades">0</span>
+                        </div>
+                    </div>
+
+                    <!-- Mode Info -->
+                    <div class="mode-info" id="modeInfo"
+                        style="margin-top: 12px; padding: 10px; background: rgba(16, 185, 129, 0.1); border-radius: 6px; border: 1px solid rgba(16, 185, 129, 0.2);">
+                        <p style="margin: 0; font-size: 11px; color: var(--text-secondary);">
+                            ✅ Paper mode active - All trades are simulated with real market data. No blockchain
+                            transactions will be executed.
+                        </p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- MCP Tools Section -->
+            <div class="mcp-tools-section" style="margin-top: 24px;">
+                <h3 style="font-size: 14px; margin-bottom: 12px;">🔧 MCP Tools</h3>
+
+                <div class="mcp-tools-card">
+                    <div class="mcp-tools-header">
+                        <button class="mcp-disable-all-btn" id="disableAllToolsBtn" onclick="toggleAllTools(false)">
+                            Disable all
+                        </button>
+                    </div>
+
+                    <div class="mcp-tools-list">
+                        <!-- Token Information Tool -->
+                        <div class="mcp-tool-item">
+                            <div class="mcp-tool-toggle">
+                                <input type="checkbox" id="tool-getTokenInfo" class="mcp-tool-checkbox" checked onchange="handleToolToggle('getTokenInfo', this.checked)">
+                                <label for="tool-getTokenInfo" class="mcp-tool-slider"></label>
+                            </div>
+                            <div class="mcp-tool-info">
+                                <div class="mcp-tool-name">Get-token-info</div>
+                                <div class="mcp-tool-desc">Fetch token price, market data & bonding curve info</div>
+                            </div>
+                        </div>
+
+                        <!-- Buy Token Tool -->
+                        <div class="mcp-tool-item">
+                            <div class="mcp-tool-toggle">
+                                <input type="checkbox" id="tool-buyToken" class="mcp-tool-checkbox" checked onchange="handleToolToggle('buyToken', this.checked)">
+                                <label for="tool-buyToken" class="mcp-tool-slider"></label>
+                            </div>
+                            <div class="mcp-tool-info">
+                                <div class="mcp-tool-name">Buy-token</div>
+                                <div class="mcp-tool-desc">Execute token purchases on Solana</div>
+                            </div>
+                        </div>
+
+                        <!-- Sell Token Tool -->
+                        <div class="mcp-tool-item">
+                            <div class="mcp-tool-toggle">
+                                <input type="checkbox" id="tool-sellToken" class="mcp-tool-checkbox" checked onchange="handleToolToggle('sellToken', this.checked)">
+                                <label for="tool-sellToken" class="mcp-tool-slider"></label>
+                            </div>
+                            <div class="mcp-tool-info">
+                                <div class="mcp-tool-name">Sell-token</div>
+                                <div class="mcp-tool-desc">Execute token sales on Solana</div>
+                            </div>
+                        </div>
+
+                        <!-- List Accounts Tool -->
+                        <div class="mcp-tool-item">
+                            <div class="mcp-tool-toggle">
+                                <input type="checkbox" id="tool-listAccounts" class="mcp-tool-checkbox" checked onchange="handleToolToggle('listAccounts', this.checked)">
+                                <label for="tool-listAccounts" class="mcp-tool-slider"></label>
+                            </div>
+                            <div class="mcp-tool-info">
+                                <div class="mcp-tool-name">List-accounts</div>
+                                <div class="mcp-tool-desc">View all available wallet accounts</div>
+                            </div>
+                        </div>
+
+                        <!-- Get Account Balance Tool -->
+                        <div class="mcp-tool-item">
+                            <div class="mcp-tool-toggle">
+                                <input type="checkbox" id="tool-getAccountBalance" class="mcp-tool-checkbox" checked onchange="handleToolToggle('getAccountBalance', this.checked)">
+                                <label for="tool-getAccountBalance" class="mcp-tool-slider"></label>
+                            </div>
+                            <div class="mcp-tool-info">
+                                <div class="mcp-tool-name">Get-account-balance</div>
+                                <div class="mcp-tool-desc">Check SOL & token balances for accounts</div>
+                            </div>
+                        </div>
+
+                        <!-- Create Account Tool -->
+                        <div class="mcp-tool-item">
+                            <div class="mcp-tool-toggle">
+                                <input type="checkbox" id="tool-createAccount" class="mcp-tool-checkbox" checked onchange="handleToolToggle('createAccount', this.checked)">
+                                <label for="tool-createAccount" class="mcp-tool-slider"></label>
+                            </div>
+                            <div class="mcp-tool-info">
+                                <div class="mcp-tool-name">Create-account</div>
+                                <div class="mcp-tool-desc">Generate new wallet accounts</div>
+                            </div>
+                        </div>
+
+                        <!-- Import Account Tool -->
+                        <div class="mcp-tool-item">
+                            <div class="mcp-tool-toggle">
+                                <input type="checkbox" id="tool-importAccount" class="mcp-tool-checkbox" checked onchange="handleToolToggle('importAccount', this.checked)">
+                                <label for="tool-importAccount" class="mcp-tool-slider"></label>
+                            </div>
+                            <div class="mcp-tool-info">
+                                <div class="mcp-tool-name">Import-account</div>
+                                <div class="mcp-tool-desc">Import existing accounts via private key</div>
+                            </div>
+                        </div>
+
+                        <!-- Get Transaction History Tool -->
+                        <div class="mcp-tool-item">
+                            <div class="mcp-tool-toggle">
+                                <input type="checkbox" id="tool-getTransactionHistory" class="mcp-tool-checkbox" checked onchange="handleToolToggle('getTransactionHistory', this.checked)">
+                                <label for="tool-getTransactionHistory" class="mcp-tool-slider"></label>
+                            </div>
+                            <div class="mcp-tool-info">
+                                <div class="mcp-tool-name">Get-transaction-history</div>
+                                <div class="mcp-tool-desc">View recent transaction records</div>
+                            </div>
+                        </div>
+
+                        <!-- Get Portfolio Summary Tool -->
+                        <div class="mcp-tool-item">
+                            <div class="mcp-tool-toggle">
+                                <input type="checkbox" id="tool-getPortfolioSummary" class="mcp-tool-checkbox" checked onchange="handleToolToggle('getPortfolioSummary', this.checked)">
+                                <label for="tool-getPortfolioSummary" class="mcp-tool-slider"></label>
+                            </div>
+                            <div class="mcp-tool-info">
+                                <div class="mcp-tool-name">Get-portfolio-summary</div>
+                                <div class="mcp-tool-desc">View complete portfolio overview & analytics</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="mcp-tools-status">
+                        <span id="enabledToolsCount" style="font-weight: 600; color: var(--success-color);">9</span>
+                        <span style="color: var(--text-secondary);"> tools enabled</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Stats -->
+            <div style="margin-top: auto; padding-top: 16px; border-top: 1px solid var(--border-color);">
+                <div style="font-size: 12px; color: var(--text-secondary);">
+                    <div>Session: <span id="sessionId">-</span></div>
+                    <div style="margin-top: 4px;">Messages: <span id="messageCount">0</span></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Replace the entire .main-content div with this -->
+        <div class="main-content">
+            <!-- Split Screen Container -->
+            <div class="split-container">
+
+                <!-- LEFT PANEL: Chat Interface -->
+                <div class="chat-panel" id="chatPanel">
+                    <!-- Chat Header -->
+                    <div class="chat-header">
+                        <h2>💬 Strategy Builder Chat</h2>
+                        <div class="sol-price-display">
+                            <div class="sol-price-icon">SOL</div>
+                            <div class="sol-price-info">
+                                <div class="sol-price-value" id="solPrice">$0.00</div>
+                                <div class="sol-price-change" id="solPriceChange">Loading...</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Welcome Screen -->
+                    <div class="welcome-screen" id="welcomeScreen">
+                        <h2>👋 Welcome to AI Trading Agent</h2>
+                        <p>I'll help you create and execute profitable SOL trading strategies</p>
+
+                        <div class="example-prompts">
+                            <button class="example-prompt"
+                                onclick="useExamplePrompt('Create a DCA strategy to buy 0.1 SOL every hour')">
+                                📊 DCA Strategy
+                            </button>
+                            <button class="example-prompt"
+                                onclick="useExamplePrompt('Set up a grid trading strategy between $180-$200')">
+                                📈 Grid Trading
+                            </button>
+                            <button class="example-prompt" onclick="useExamplePrompt('Build a momentum strategy')">
+                                🚀 Momentum Trading
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Chat Messages -->
+                    <div class="chat-messages" id="chatMessages"></div>
+
+                    <!-- Typing Indicator -->
+                    <div class="typing-indicator" id="typingIndicator">
+                        <div class="typing-dot"></div>
+                        <div class="typing-dot"></div>
+                        <div class="typing-dot"></div>
+                    </div>
+
+                    <!-- Input Area -->
+                    <div class="input-container">
+                        <div class="input-wrapper">
+                            <textarea class="chat-input" id="chatInput" placeholder="Message AI Trading Agent..."
+                                rows="1" onkeydown="handleKeyDown(event)"></textarea>
+                            <button class="send-button" id="sendButton" onclick="sendMessage()">
+                                <svg class="send-icon" viewBox="0 0 24 24">
+                                    <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />
+                                </svg>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- DIVIDER/RESIZE HANDLE -->
+                <div class="resize-handle" id="resizeHandle"></div>
+
+                <!-- RIGHT PANEL: Strategy Execution View -->
+                <div class="strategy-panel collapsed" id="strategyPanel">
+                    <!-- Strategy Panel Header -->
+                    <div class="strategy-panel-header">
+                        <h2>📊 Strategy Execution</h2>
+                        <button class="toggle-panel-btn" onclick="toggleStrategyPanel()" title="Toggle Panel">
+                            <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+                                <path d="M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z" />
+                            </svg>
+                        </button>
+                    </div>
+
+                    <!-- Strategy Panel Content -->
+                    <div class="strategy-panel-content">
+                        <!-- No Strategy State -->
+                        <div class="no-strategy-state" id="noStrategyState">
+                            <div class="no-strategy-icon">📉</div>
+                            <h3>No Active Strategy</h3>
+                            <p>Create a strategy using the chat to see live execution here</p>
+                        </div>
+
+                        <!-- Active Strategy View -->
+                        <div class="active-strategy-view" id="activeStrategyView" style="display: none;">
+                            <!-- Strategy Status Card -->
+                            <div class="strategy-status-card">
+                                <div class="status-header">
+                                    <h3 id="strategyName">DCA Buy Strategy</h3>
+                                    <span class="status-badge" id="statusBadge">IDLE</span>
+                                </div>
+                                <div class="strategy-description" id="strategyDescription">
+                                    Strategy will appear here once created
+                                </div>
+                            </div>
+
+                            <!-- Live Metrics -->
+                            <div class="live-metrics">
+                                <div class="metric-card">
+                                    <div class="metric-label">EXECUTIONS</div>
+                                    <div class="metric-value" id="executionCount">0</div>
+                                </div>
+                                <div class="metric-card">
+                                    <div class="metric-label">TOTAL P&L</div>
+                                    <div class="metric-value profit" id="totalPnL">+$0.00</div>
+                                </div>
+                                <div class="metric-card">
+                                    <div class="metric-label">ROI</div>
+                                    <div class="metric-value" id="roi">+0.00%</div>
+                                </div>
+                                <div class="metric-card">
+                                    <div class="metric-label">WIN RATE</div>
+                                    <div class="metric-value" id="winRate">0.0%</div>
+                                </div>
+                            </div>
+
+                            <!-- Advanced Metrics Panel -->
+                            <div class="advanced-metrics-panel" id="advancedMetricsPanel" style="display: none;">
+                                <div class="advanced-metrics-header">
+                                    <h4>📊 Advanced Metrics</h4>
+                                </div>
+                                <div class="advanced-metrics-grid">
+                                    <div class="advanced-metric-item">
+                                        <span class="advanced-metric-label">Profit Factor</span>
+                                        <span class="advanced-metric-value" id="advProfitFactor">-</span>
+                                    </div>
+                                    <div class="advanced-metric-item">
+                                        <span class="advanced-metric-label">Sharpe Ratio</span>
+                                        <span class="advanced-metric-value" id="advSharpeRatio">-</span>
+                                    </div>
+                                    <div class="advanced-metric-item">
+                                        <span class="advanced-metric-label">Max Drawdown</span>
+                                        <span class="advanced-metric-value" id="advMaxDrawdown">-</span>
+                                    </div>
+                                    <div class="advanced-metric-item">
+                                        <span class="advanced-metric-label">Avg Win</span>
+                                        <span class="advanced-metric-value" id="advAvgWin">-</span>
+                                    </div>
+                                    <div class="advanced-metric-item">
+                                        <span class="advanced-metric-label">Avg Loss</span>
+                                        <span class="advanced-metric-value" id="advAvgLoss">-</span>
+                                    </div>
+                                    <div class="advanced-metric-item">
+                                        <span class="advanced-metric-label">Execution Rate</span>
+                                        <span class="advanced-metric-value" id="advExecRate">-</span>
+                                    </div>
+                                    <div class="advanced-metric-item">
+                                        <span class="advanced-metric-label">Win/Loss Ratio</span>
+                                        <span class="advanced-metric-value" id="advWinLossRatio">-</span>
+                                    </div>
+                                    <div class="advanced-metric-item">
+                                        <span class="advanced-metric-label">Total Fees</span>
+                                        <span class="advanced-metric-value" id="advTotalFees">-</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Live Trade Feed -->
+                            <div class="live-trade-feed">
+                                <h4>📊 Live Trade Feed</h4>
+                                <div class="trade-feed-list" id="tradeFeedList">
+                                    <!-- Trades will be added here dynamically -->
+                                </div>
+                            </div>
+
+                            <!-- Strategy Actions -->
+                            <div class="strategy-actions">
+                                <button class="action-btn pause-btn" onclick="pauseStrategy()" id="pauseBtnPanel">
+                                    ⏸️ Pause
+                                </button>
+                                <button class="action-btn pause-btn" onclick="resumeStrategy()" id="resumeBtnPanel"
+                                    style="display: none; background: rgba(16, 185, 129, 0.2); color: #10b981; border: 1px solid rgba(16, 185, 129, 0.3);">
+                                    ▶️ Resume
+                                </button>
+                                <button class="action-btn stop-btn" onclick="stopStrategy()">
+                                    ⏹️ Stop
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <!-- Notification Container -->
+        <div id="notificationContainer"></div>
+
+        <!-- Mobile Strategy Panel Button -->
+        <button class="mobile-strategy-btn" onclick="toggleStrategyPanel()" id="mobileStrategyBtn"
+            title="View Strategy">
+            📊
+        </button>
+
+        <!-- Jupiter Swap Modal (Center of screen) -->
+        <div id="jupiterModal" class="jupiter-modal" style="display: none;">
+            <div class="jupiter-modal-overlay" onclick="closeJupiterModal()"></div>
+            <div class="jupiter-modal-content">
+                <div class="jupiter-modal-header">
+                    <h3>⚡ Jupiter DEX Swap</h3>
+                    <button class="jupiter-modal-close" onclick="closeJupiterModal()">✕</button>
+                </div>
+                <div class="jupiter-modal-body">
+                    <div id="jupiter-plugin"></div>
+                </div>
+            </div>
+        </div>
+
+        <script>
+            // API Configuration
+            const API_BASE = 'http://localhost:3000';
+
+            // Initialize Socket.IO connection
+            const socket = io(API_BASE, {
+                transports: ['websocket', 'polling'],
+                reconnection: true,
+                reconnectionDelay: 1000,
+                reconnectionAttempts: 5
+            });
+
+            // Socket connection events
+            socket.on('connect', () => {
+                console.log('✅ WebSocket connected');
+
+                // Subscribe to current strategy if exists
+                if (currentStrategyId) {
+                    subscribeToPerformanceUpdates(currentStrategyId);
+                }
+            });
+
+            socket.on('disconnect', () => {
+                console.log('⚠️ WebSocket disconnected');
+            });
+
+            socket.on('connect_error', (error) => {
+                console.error('❌ WebSocket connection error:', error);
+            });
+
+            // Listen for real-time performance updates
+            socket.on('performance:update', (data) => {
+                // ⚠️ CRITICAL: Don't process performance updates in paper trading mode
+                // Paper trading uses its own events: paper:trade:executed and paper:simulation:update
+                if (paperTradingMode === 'paper') {
+                    return;
+                }
+
+                if (data.strategyId === currentStrategyId && data.data) {
+                    // Update with enhanced data structure
+                    const perfData = data.data;
+                    
+                    // Extract metrics from enhanced structure
+                    const metrics = {
+                        totalExecutions: perfData.tradeStats?.totalExecutions || perfData.totalExecutions || 0,
+                        totalProfitUSD: perfData.financials?.totalProfitUSD || perfData.totalProfitUSD || 0,
+                        roi: perfData.roiMetrics?.roi || perfData.roi || 0,
+                        winRate: perfData.tradeStats?.successRate || perfData.successRate || 0,
+                        
+                        // Additional detailed metrics
+                        realizedProfitUSD: perfData.financials?.realizedProfitUSD || 0,
+                        unrealizedProfitUSD: perfData.financials?.unrealizedProfitUSD || 0,
+                        totalFeesUSD: perfData.financials?.totalFeesUSD || 0,
+                        feesPercentage: perfData.financials?.feesPercentage || 0,
+                        
+                        // Timing info
+                        durationMinutes: perfData.timing?.durationMinutes || 0,
+                        executionsPerMinute: perfData.timing?.executionsPerMinute || 0,
+                        
+                        // ROI projections
+                        dailyROI: perfData.roiMetrics?.dailyROI || 0,
+                        projectedMonthlyROI: perfData.roiMetrics?.projectedMonthlyROI || 0,
+                    };
+                    
+                    updateStrategyStatusFromPerformance(perfData);
+                    updateLiveMetrics(metrics);
+                }
+            });
+
+            // Listen for trade execution notifications
+            socket.on('trade:executed', (data) => {
+                showTradeNotification(data);
+
+                // Add to right panel trade feed
+                addTradeToLiveFeed(data);
+            });
+
+            // Listen for REAL pump.fun trades detected from blockchain
+            socket.on('pumpfun:live_trade_detected', (trade) => {
+                console.log('🔥 [REAL TRADE DETECTED]', trade);
+                
+                // Display in live feed
+                const feedTrade = {
+                    type: trade.type,
+                    side: trade.type,
+                    amount: trade.solAmount,
+                    amountSOL: trade.solAmount,
+                    amountTokens: trade.tokenAmount,
+                    price: trade.price,
+                    timestamp: trade.timestamp,
+                    signature: trade.signature,
+                    trader: trade.trader,
+                    isRealBlockchain: true,
+                    tokenAddress: trade.tokenAddress
+                };
+                
+                addTradeToLiveFeed(feedTrade);
+                
+                // Show notification
+                showNotification(
+                    `🔥 REAL ${trade.type.toUpperCase()} on Blockchain!\n` +
+                    `Amount: ${trade.solAmount.toFixed(4)} SOL\n` +
+                    `Price: $${trade.price.toFixed(8)}`,
+                    'info'
+                );
+            });
+
+            // Listen for strategy status changes
+            socket.on('strategy:status', (data) => {
+                if (data.strategyId === currentStrategyId || data.runningId === currentStrategyId) {
+                    const statusMap = {
+                        'running': 'active',
+                        'paused': 'paused',
+                        'stopped': 'idle',
+                        'completed': 'idle',
+                        'failed': 'error'
+                    };
+
+                    const uiStatus = statusMap[data.status] || data.status;
+                    // Safely grab the displayed strategy name from the right panel.  The
+                    // original code referenced a non‑existent `strategyNameDisplay` element
+                    // which would throw an error.  Instead, read from the `strategyName` element
+                    // if it exists; otherwise fall back to null.
+                    const strategyNameEl = document.getElementById('strategyName');
+                    const strategyName = strategyNameEl ? strategyNameEl.textContent : null;
+
+                    updateStrategyStatus(uiStatus, strategyName && strategyName !== '-' ? strategyName : null);
+
+                    // Show notification with additional context
+                    const statusMessages = {
+                        'running': '▶️ Strategy resumed',
+                        'paused': '⏸️ Strategy paused',
+                        'stopped': '⏹️ Strategy stopped'
+                    };
+
+                    let message = statusMessages[data.status];
+                    
+                    // Add context if available
+                    if (data.context && data.context.totalExecutions > 0) {
+                        message += ` (${data.context.totalExecutions} trades, ${data.context.roi?.toFixed(2)}% ROI)`;
+                    }
+
+                    if (message) {
+                        showNotification(message, 'info');
+                    }
+                }
+            });
+
+            // ✅ NEW: Listen for strategy:started event to show active strategy in right panel
+            socket.on('strategy:started', (data) => {
+                console.log('🚀 [strategy:started] Strategy execution started:', data);
+                console.log('🚀 Running ID (full):', data.strategyId);
+                console.log('🚀 Strategy config:', data.strategy);
+                console.log('🚀 Paper session:', data.sessionId);
+
+                // CRITICAL: Store the FULL runningId (strategyId here is actually runningId)
+                // Backend sends runningStrategyId as "strategyId" in the event
+                // runningId format: reactive-1761538241056-1761538241064
+                currentStrategyId = data.strategyId; // This is actually the runningId
+                if (data.sessionId) {
+                    currentPaperSessionId = data.sessionId;
+                    console.log('🚀 Updated currentPaperSessionId:', currentPaperSessionId);
+                }
+
+                // Show the strategy in the right panel
+                if (data.strategy) {
+                    showActiveStrategyInPanel(data.strategy, data.strategyId);
+                    showNotification(`✅ Strategy "${data.strategy.name || 'Strategy'}" is now active!`, 'success');
+                }
+            });
+
+            // Listen for strategy stopped event
+            socket.on('strategy:stopped', (data) => {
+                console.log('🛑 Strategy stopped event received:', data);
+                
+                if (currentStrategyId === data.runningId || currentStrategyId === data.strategyId) {
+                    console.log('✅ Our strategy stopped, updating UI');
+                    
+                    // Update strategy status panel
+                    updateStrategyStatus('stopped', 'No Active Strategy', 0);
+                    
+                    // Clear current strategy
+                    currentStrategyId = null;
+                    
+                    // Show notification
+                    showNotification('✅ Strategy stopped successfully', 'success');
+                    
+                    // Hide active strategy panel
+                    const activeStrategyPanel = document.getElementById('activeStrategyPanel');
+                    if (activeStrategyPanel) {
+                        activeStrategyPanel.style.display = 'none';
+                    }
+                    
+                    // Show "No Active Strategy" message
+                    const executionPanel = document.querySelector('.execution-panel-content');
+                    if (executionPanel) {
+                        executionPanel.innerHTML = `
+                            <div style="text-align: center; padding: 40px 20px; color: rgba(255,255,255,0.6);">
+                                <div style="font-size: 48px; margin-bottom: 16px;">📊</div>
+                                <h3 style="margin: 0 0 8px 0; font-size: 18px; color: rgba(255,255,255,0.8);">No Active Strategy</h3>
+                                <p style="margin: 0; font-size: 14px;">Create a strategy using the chat to see live execution here</p>
+                            </div>
+                        `;
+                    }
+                }
+            });
+
+
+            // Global State
+            let sessionId = generateSessionId();
+            let walletAddress = null;
+            let walletPublicKey = null;
+            let currentStrategy = null;
+            let messageCount = 0;
+            let solBalance = 0;
+            let lastSolPrice = null;
+            let priceUpdateInterval = null;
+            let isAgentTyping = false; // Track if agent is responding
+
+            // Initialize
+            document.getElementById('sessionId').textContent = sessionId.substring(0, 8);
+
+            // Start SOL price updates
+            updateSolPrice();
+            priceUpdateInterval = setInterval(updateSolPrice, 30000); // Update every 30 seconds to avoid rate limits
+
+            /**
+             * Subscribe to performance updates for a strategy
+             */
+            function subscribeToPerformanceUpdates(strategyId) {
+                if (!socket.connected) {
+                    console.warn('Socket not connected, cannot subscribe to performance updates');
+                    return;
+                }
+
+                socket.emit('performance:subscribe', { strategyId });
+                console.log(`🔔 Subscribed to performance updates for: ${strategyId}`);
+            }
+
+            /**
+             * Unsubscribe from performance updates
+             */
+            function unsubscribeFromPerformanceUpdates(strategyId) {
+                if (!socket.connected) return;
+
+                socket.emit('performance:unsubscribe', { strategyId });
+                console.log(`🔕 Unsubscribed from performance updates for: ${strategyId}`);
+            }
+
+            /**
+             * Update strategy status from performance data
+             */
+            function updateStrategyStatusFromPerformance(performance) {
+                if (!performance) return;
+
+                const statusMap = {
+                    'running': 'active',
+                    'paused': 'paused',
+                    'completed': 'idle',
+                    'failed': 'error'
+                };
+
+                const uiStatus = statusMap[performance.status] || 'active';
+                const profit = performance.totalProfitUSD || 0;
+                const strategyName = performance.strategyName || 'Strategy';
+
+                updateStrategyStatus(uiStatus, strategyName, profit);
+
+                // Update balance displays
+                if (performance.currentBalanceSOL !== undefined) {
+                    document.getElementById('solBalance').textContent = performance.currentBalanceSOL.toFixed(4);
+                }
+            }
+
+            /**
+             * Update analytics display (for compatibility)
+             */
+            function updateAnalyticsDisplay(data) {
+                console.log('📈 Updating analytics display:', data);
+                updateLiveMetrics(data);
+            }
+
+            /**
+             * Add trade to live feed in right panel
+             */
+            function addTradeToLiveFeed(trade) {
+                const feedList = document.getElementById('tradeFeedList');
+                if (!feedList) {
+                    return;
+                }
+
+                // Remove empty message if exists
+                const emptyMsg = feedList.querySelector('.trade-feed-empty');
+                if (emptyMsg) {
+                    emptyMsg.remove();
+                }
+
+                const tradeItem = document.createElement('div');
+                const isRealBlockchain = trade.isRealBlockchain === true;
+                tradeItem.className = `trade-item ${trade.type || trade.side || 'buy'} ${isRealBlockchain ? 'real-blockchain' : ''}`;
+
+                const timestamp = new Date(trade.timestamp || Date.now());
+                const timeStr = timestamp.toLocaleTimeString();
+
+                const isBuy = (trade.type === 'buy' || trade.side === 'buy');
+                
+                // Display indicator for real blockchain trades
+                const blockchainIndicator = isRealBlockchain ? '🔴 REAL ' : '📊 ';
+                
+                // Display correct information based on trade type
+                let displayAmount, displayPrice, displayText;
+                
+                if (isBuy) {
+                    // BUY: Show SOL spent → tokens received @ token price
+                    const solSpent = trade.amountSOL || trade.amount || 0;
+                    
+                    // 🔍 DEBUG: Check EACH fallback individually
+                    console.log('🔍 [DEBUG] Checking tokensReceived fallbacks:', {
+                        'trade.amountTokens': trade.amountTokens,
+                        'typeof amountTokens': typeof trade.amountTokens,
+                        'amountTokens is undefined': trade.amountTokens === undefined,
+                        'trade.position': trade.position,
+                        'trade.position?.size': trade.position?.size,
+                        'trade.balanceDeltas': trade.balanceDeltas,
+                        'trade.balanceDeltas?.tokenDelta': trade.balanceDeltas?.tokenDelta
+                    });
+                    
+                    const tokensReceived = trade.amountTokens || trade.position?.size || trade.balanceDeltas?.tokenDelta || 0;
+                    const tokenPrice = trade.priceUSD || trade.price || 0;
+                    const tokenSymbol = trade.tokenSymbol || trade.quoteToken || trade.position?.tokenSymbol || 'TOKEN';
+                    
+                    // 🔍 DEBUG: Log what we're using for display
+                    console.log('🔍 [DEBUG] BUY Trade Display FINAL VALUES:', {
+                        solSpent,
+                        tokensReceived,
+                        tokenPrice,
+                        tokenSymbol
+                    });
+                    
+                    // Format token amount
+                    let formattedTokens;
+                    if (tokensReceived >= 1000000) {
+                        formattedTokens = `${(tokensReceived / 1000000).toFixed(2)}M`;
+                    } else if (tokensReceived >= 1000) {
+                        formattedTokens = `${(tokensReceived / 1000).toFixed(2)}K`;
+                    } else if (tokensReceived > 0) {
+                        formattedTokens = tokensReceived.toFixed(2);
+                    } else {
+                        formattedTokens = '0.00';
+                    }
+                    
+                    displayText = `${solSpent.toFixed(4)} SOL → ${formattedTokens} ${tokenSymbol} @ $${tokenPrice.toFixed(6)}`;
+                } else {
+                    // SELL: Show tokens sold, SOL received, and price
+                    const tokenAmount = trade.amountTokens || trade.amount || 0;
+                    const solReceived = trade.amountSOL || 0;
+                    const tokenPrice = trade.priceUSD || trade.price || 0;
+                    const tokenSymbol = trade.tokenSymbol || 'TOKEN';
+                    
+                    // Format token amount with K/M suffix for readability
+                    let formattedTokenAmount;
+                    if (tokenAmount >= 1000000) {
+                        formattedTokenAmount = `${(tokenAmount / 1000000).toFixed(2)}M`;
+                    } else if (tokenAmount >= 1000) {
+                        formattedTokenAmount = `${(tokenAmount / 1000).toFixed(2)}K`;
+                    } else {
+                        formattedTokenAmount = tokenAmount.toFixed(2);
+                    }
+                    
+                    displayText = `${formattedTokenAmount} ${tokenSymbol} → ${solReceived.toFixed(6)} SOL @ $${tokenPrice.toFixed(6)}`;
+                }
+
+                tradeItem.innerHTML = `
+        <div class="trade-item-header">
+            <span class="trade-type ${isBuy ? 'buy' : 'sell'}">${blockchainIndicator}${isBuy ? 'BUY' : 'SELL'}</span>
+            <span class="trade-time">${timeStr}</span>
+        </div>
+        <div class="trade-details">
+            ${displayText}
+            ${isRealBlockchain ? '<div class="blockchain-badge">✅ Real Blockchain Trade</div>' : ''}
+        </div>
+    `;
+
+                // Add to top of feed
+                feedList.insertBefore(tradeItem, feedList.firstChild);
+
+                // Keep only last 20 trades
+                while (feedList.children.length > 20) {
+                    feedList.removeChild(feedList.lastChild);
+                }
+            }
+
+            /**
+             * Add simulation activity to live feed
+             */
+            function addSimulationToLiveFeed(simulation) {
+                const feedList = document.getElementById('tradeFeedList');
+                if (!feedList) {
+                    return;
+                }
+
+                // Remove empty message if exists
+                const emptyMsg = feedList.querySelector('.trade-feed-empty');
+                if (emptyMsg) {
+                    emptyMsg.remove();
+                }
+
+                const simItem = document.createElement('div');
+                simItem.className = `trade-item simulation ${simulation.type || simulation.side || 'buy'}`;
+                simItem.style.opacity = '0.7';
+                simItem.style.borderLeft = '3px solid rgba(59, 130, 246, 0.5)';
+
+                const timestamp = new Date(simulation.timestamp || Date.now());
+                const timeStr = timestamp.toLocaleTimeString();
+
+                const isBuy = (simulation.type === 'buy' || simulation.side === 'buy');
+                
+                // Display correct information based on simulation type
+                let displayText;
+                
+                if (isBuy) {
+                    // BUY: Show SOL spent → tokens received @ token price
+                    const solSpent = simulation.amountSOL || simulation.amount || 0;
+                    const tokensReceived = simulation.amountTokens || simulation.position?.size || simulation.balanceDeltas?.tokenDelta || 0;
+                    const tokenPrice = simulation.priceUSD || simulation.price || 0;
+                    const tokenSymbol = simulation.tokenSymbol || simulation.quoteToken || simulation.position?.tokenSymbol || 'TOKEN';
+                    
+                    // Format token amount
+                    let formattedTokens;
+                    if (tokensReceived >= 1000000) {
+                        formattedTokens = `${(tokensReceived / 1000000).toFixed(2)}M`;
+                    } else if (tokensReceived >= 1000) {
+                        formattedTokens = `${(tokensReceived / 1000).toFixed(2)}K`;
+                    } else if (tokensReceived > 0) {
+                        formattedTokens = tokensReceived.toFixed(2);
+                    } else {
+                        formattedTokens = '0.00';
+                    }
+                    
+                    displayText = `${solSpent.toFixed(4)} SOL → ${formattedTokens} ${tokenSymbol} @ $${tokenPrice.toFixed(6)}`;
+                } else {
+                    // SELL: Show tokens sold, SOL received, and price
+                    const tokenAmount = simulation.amountTokens || simulation.amount || 0;
+                    const solReceived = simulation.amountSOL || 0;
+                    const tokenPrice = simulation.priceUSD || simulation.price || 0;
+                    const tokenSymbol = simulation.tokenSymbol || 'TOKEN';
+                    
+                    // Format token amount with K/M suffix for readability
+                    let formattedTokenAmount;
+                    if (tokenAmount >= 1000000) {
+                        formattedTokenAmount = `${(tokenAmount / 1000000).toFixed(2)}M`;
+                    } else if (tokenAmount >= 1000) {
+                        formattedTokenAmount = `${(tokenAmount / 1000).toFixed(2)}K`;
+                    } else {
+                        formattedTokenAmount = tokenAmount.toFixed(2);
+                    }
+                    
+                    displayText = `${formattedTokenAmount} ${tokenSymbol} → ${solReceived.toFixed(6)} SOL @ $${tokenPrice.toFixed(6)}`;
+                }
+
+                simItem.innerHTML = `
+        <div class="trade-item-header">
+            <span class="trade-type ${isBuy ? 'buy' : 'sell'}" style="opacity: 0.8;">🔄 ${isBuy ? 'BUY' : 'SELL'} SIM</span>
+            <span class="trade-time">${timeStr}</span>
+        </div>
+        <div class="trade-details" style="font-size: 11px;">
+            ${displayText}
+        </div>
+    `;
+
+                // Add to top of feed
+                feedList.insertBefore(simItem, feedList.firstChild);
+
+                // Keep only last 20 items
+                while (feedList.children.length > 20) {
+                    feedList.removeChild(feedList.lastChild);
+                }
+            }
+
+            /**
+             * Show trade notification
+             */
+            function showTradeNotification(tradeData) {
+                const type = tradeData.type || 'trade';
+                const typeIcon = type === 'buy' ? '🟢' : '🔴';
+                const typeText = type === 'buy' ? 'BUY' : 'SELL';
+                const amount = tradeData.amountSOL || tradeData.amount || 0;
+                const price = tradeData.priceUSD || 0;
+
+                const message = `${typeIcon} ${typeText} ${amount.toFixed(4)} SOL @ $${price.toFixed(2)}`;
+                showNotification(message, 'info');
+
+                // Add to message display
+                addTradeMessageToChat(tradeData);
+            }
+
+            /**
+             * Add trade message to chat
+             */
+            function addTradeMessageToChat(tradeData) {
+                // Use the correct chat container instead of a non‑existent "messages" element
+                const messagesContainer = document.getElementById('chatMessages');
+                const messageDiv = document.createElement('div');
+                messageDiv.className = 'message agent-message trade-message';
+
+                const type = tradeData.type || 'trade';
+                const typeIcon = type === 'buy' ? '🟢' : '🔴';
+                const typeText = type === 'buy' ? 'BUY' : 'SELL';
+                const amount = tradeData.amountSOL || tradeData.amount || 0;
+                const price = tradeData.priceUSD || 0;
+                const tokens = tradeData.amountTokens || 0;
+
+                messageDiv.innerHTML = `
+                <div class="trade-notification">
+                    <div class="trade-header">
+                        <span class="trade-icon">${typeIcon}</span>
+                        <span class="trade-type">${typeText} EXECUTED</span>
+                        <span class="trade-time">${new Date().toLocaleTimeString()}</span>
+                    </div>
+                    <div class="trade-details">
+                        <div class="trade-detail-item">
+                            <span class="trade-detail-label">Amount:</span>
+                            <span class="trade-detail-value">${amount.toFixed(4)} SOL</span>
+                        </div>
+                        <div class="trade-detail-item">
+                            <span class="trade-detail-label">Price:</span>
+                            <span class="trade-detail-value">$${price.toFixed(2)}</span>
+                        </div>
+                        ${tokens > 0 ? `
+                        <div class="trade-detail-item">
+                            <span class="trade-detail-label">Tokens:</span>
+                            <span class="trade-detail-value">${tokens.toFixed(2)}</span>
+                        </div>
+                        ` : ''}
+                    </div>
+                </div>
+            `;
+
+                messagesContainer.appendChild(messageDiv);
+                messagesContainer.scrollTop = messagesContainer.scrollHeight;
+            }
+
+            /**
+             * Update strategy status display (simplified - only updates right panel)
+             */
+            function updateStrategyStatus(status, strategyName = null, profit = null) {
+                // Update right panel status badge if active view is visible
+                const activeView = document.getElementById('activeStrategyView');
+                if (activeView && activeView.style.display !== 'none') {
+                    const rightPanelBadge = activeView.querySelector('.status-badge');
+                    if (rightPanelBadge) {
+                        rightPanelBadge.className = 'status-badge';
+
+                        switch (status) {
+                            case 'idle':
+                                rightPanelBadge.classList.add('idle');
+                                rightPanelBadge.textContent = 'IDLE';
+                                break;
+                            case 'creating':
+                                rightPanelBadge.classList.add('active');
+                                rightPanelBadge.textContent = 'CREATING';
+                                break;
+                            case 'active':
+                                rightPanelBadge.classList.add('active');
+                                rightPanelBadge.textContent = 'ACTIVE';
+                                break;
+                            case 'paused':
+                                rightPanelBadge.classList.add('paused');
+                                rightPanelBadge.textContent = 'PAUSED';
+                                break;
+                            case 'error':
+                                rightPanelBadge.classList.add('error');
+                                rightPanelBadge.textContent = 'ERROR';
+                                break;
+                        }
+                    }
+
+                    // Update strategy name if provided
+                    if (strategyName) {
+                        const strategyNameEl = document.getElementById('strategyName');
+                        if (strategyNameEl) strategyNameEl.textContent = strategyName;
+                    }
+                }
+            }
+
+            /**
+             * Pause the currently active strategy
+             */
+            async function pauseStrategy() {
+                if (!currentStrategyId) {
+                    showNotification('⚠️ No active strategy to pause', 'warning');
+                    return;
+                }
+
+                try {
+                    showNotification('⏸️ Pausing strategy...', 'info');
+
+                    const response = await fetch(`${API_BASE}/api/v1/strategies/${currentStrategyId}/pause`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            runningId: currentStrategyId
+                        })
+                    });
+
+                    const data = await response.json();
+
+                    if (data.success) {
+                        // Get strategy name from right panel
+                        const strategyNameEl = document.getElementById('strategyName');
+                        const strategyName = strategyNameEl ? strategyNameEl.textContent : 'Strategy';
+
+                        updateStrategyStatus('paused', strategyName);
+                        showNotification('⏸️ Strategy paused successfully', 'success');
+                        addMessage('system', '⏸️ Strategy has been paused');
+
+                        // Update status badge in right panel
+                        const activeView = document.getElementById('activeStrategyView');
+                        if (activeView) {
+                            const rightPanelBadge = activeView.querySelector('.status-badge');
+                            if (rightPanelBadge) {
+                                rightPanelBadge.className = 'status-badge paused';
+                                rightPanelBadge.textContent = 'PAUSED';
+                            }
+
+                            // Toggle buttons
+                            const pauseBtn = document.getElementById('pauseBtnPanel');
+                            const resumeBtn = document.getElementById('resumeBtnPanel');
+                            if (pauseBtn) pauseBtn.style.display = 'none';
+                            if (resumeBtn) resumeBtn.style.display = 'flex';
+                        }
+                    } else {
+                        showNotification('❌ Failed to pause strategy', 'error');
+                    }
+                } catch (error) {
+                    console.error('Error pausing strategy:', error);
+                    showNotification('❌ Failed to pause strategy', 'error');
+                }
+            }
+
+            /**
+             * Resume the currently paused strategy
+             */
+            async function resumeStrategy() {
+                if (!currentStrategyId) {
+                    showNotification('⚠️ No paused strategy to resume', 'warning');
+                    return;
+                }
+
+                try {
+                    showNotification('▶️ Resuming strategy...', 'info');
+
+                    const response = await fetch(`${API_BASE}/api/v1/strategies/${currentStrategyId}/resume`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            runningId: currentStrategyId
+                        })
+                    });
+
+                    const data = await response.json();
+
+                    if (data.success) {
+                        // Get strategy name from right panel
+                        const strategyNameEl = document.getElementById('strategyName');
+                        const strategyName = strategyNameEl ? strategyNameEl.textContent : 'Strategy';
+
+                        updateStrategyStatus('active', strategyName);
+                        showNotification('▶️ Strategy resumed successfully', 'success');
+                        addMessage('system', '▶️ Strategy has been resumed');
+
+                        // Update status badge in right panel
+                        const activeView = document.getElementById('activeStrategyView');
+                        if (activeView) {
+                            const rightPanelBadge = activeView.querySelector('.status-badge');
+                            if (rightPanelBadge) {
+                                rightPanelBadge.className = 'status-badge active';
+                                rightPanelBadge.textContent = 'ACTIVE';
+                            }
+
+                            // Toggle buttons
+                            const pauseBtn = document.getElementById('pauseBtnPanel');
+                            const resumeBtn = document.getElementById('resumeBtnPanel');
+                            if (pauseBtn) pauseBtn.style.display = 'flex';
+                            if (resumeBtn) resumeBtn.style.display = 'none';
+                        }
+                    } else {
+                        showNotification('❌ Failed to resume strategy', 'error');
+                    }
+                } catch (error) {
+                    console.error('Error resuming strategy:', error);
+                    showNotification('❌ Failed to resume strategy', 'error');
+                }
+            }
+
+            /**
+             * Stop the currently active strategy
+             */
+            async function stopStrategy() {
+                console.log('🔍 [UI stopStrategy] Function called, currentStrategyId:', currentStrategyId);
+                
+                if (!currentStrategyId) {
+                    console.log('🔍 [UI stopStrategy] No currentStrategyId, showing warning');
+                    showNotification('⚠️ No active strategy to stop', 'warning');
+                    return;
+                }
+
+                // Confirm before stopping
+                console.log('🔍 [UI stopStrategy] Showing confirmation dialog');
+                if (!confirm('Are you sure you want to stop this strategy? This action cannot be undone.')) {
+                    console.log('🔍 [UI stopStrategy] User cancelled');
+                    return;
+                }
+
+                try {
+                    showNotification('⏹️ Stopping strategy...', 'info');
+
+                    // Extract base strategyId from runningId
+                    // runningId format: reactive-1761538241056-1761538241064
+                    // base strategyId: reactive-1761538241056
+                    const runningId = currentStrategyId;
+                    const baseStrategyId = runningId.split('-').slice(0, -1).join('-');
+                    
+                    console.log('⏹️ Stopping strategy:', { runningId, baseStrategyId });
+                    console.log('🔍 [UI stopStrategy] Making API call to:', `${API_BASE}/api/v1/strategies/${baseStrategyId}/stop`);
+
+                    const response = await fetch(`${API_BASE}/api/v1/strategies/${baseStrategyId}/stop`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            runningId: runningId // Send the FULL runningId in body
+                        })
+                    });
+                    
+                    console.log('🔍 [UI stopStrategy] API response status:', response.status, response.statusText);
+
+                    const data = await response.json();
+                    console.log('🔍 [UI stopStrategy] API response data:', data);
+
+                    if (data.success) {
+                        console.log('🔍 [UI stopStrategy] Success! Updating UI state');
+                        updateStrategyStatus('idle');
+                        const stoppedStrategyId = currentStrategyId;
+                        currentStrategyId = null;
+
+                        // Unsubscribe from performance updates
+                        if (socket.connected) {
+                            socket.emit('performance:unsubscribe', { strategyId: stoppedStrategyId });
+                        }
+
+                        showNotification('⏹️ Strategy stopped successfully', 'success');
+                        addMessage('system', '⏹️ Strategy has been stopped');
+
+                        // Hide active strategy view in right panel
+                        const activeView = document.getElementById('activeStrategyView');
+                        const noStrategyState = document.getElementById('noStrategyState');
+                        if (activeView) activeView.style.display = 'none';
+                        if (noStrategyState) noStrategyState.style.display = 'flex';
+                    } else {
+                        console.log('🔍 [UI stopStrategy] Failed response from API');
+                        showNotification('❌ Failed to stop strategy', 'error');
+                    }
+                } catch (error) {
+                    console.error('🔍 [UI stopStrategy] Error caught:', error);
+                    showNotification('❌ Failed to stop strategy', 'error');
+                }
+            }
+
+            /**
+             * Show loading animation for agent response
+             */
+            function showAgentTyping() {
+                isAgentTyping = true;
+                document.getElementById('typingIndicator').classList.add('active');
+                document.getElementById('sendButton').disabled = true;
+            }
+
+            /**
+             * Hide loading animation
+             */
+            function hideAgentTyping() {
+                isAgentTyping = false;
+                document.getElementById('typingIndicator').classList.remove('active');
+                document.getElementById('sendButton').disabled = false;
+            }
+
+            // Restore wallet connection on page load
+            async function restoreWalletConnection() {
+                const savedWalletAddress = localStorage.getItem('phantom_wallet_address');
+                if (savedWalletAddress && window.solana) {
+                    try {
+                        // Check if wallet is still connected
+                        const response = await window.solana.connect({ onlyIfTrusted: true });
+                        if (response && response.publicKey.toString() === savedWalletAddress) {
+                            walletPublicKey = response.publicKey;
+                            walletAddress = savedWalletAddress;
+
+                            // Update UI
+                            document.getElementById('walletStatusIndicator').classList.add('connected');
+                            document.getElementById('walletStatusText').textContent = 'Connected';
+                            document.getElementById('walletDetails').style.display = 'block';
+                            const shortAddress = walletAddress.substring(0, 4) + '...' + walletAddress.substring(walletAddress.length - 4);
+                            document.getElementById('walletAddress').textContent = shortAddress;
+                            document.getElementById('connectWalletBtn').style.display = 'none';
+                            document.getElementById('disconnectWalletBtn').style.display = 'block';
+
+                            // Pump.fun button removed
+                            // Show Jupiter DEX button when wallet is connected
+                            document.getElementById('jupiterSwapBtn').style.display = 'block';
+
+                            // Jupiter Plugin will be initialized on-demand when user clicks the button
+
+                            // Get balance (with error handling)
+                            try {
+                                await updateWalletBalance();
+                            } catch (balanceError) {
+                                console.warn('Failed to get initial balance:', balanceError);
+                                // Show 0 balance instead of error
+                                document.getElementById('walletBalance').textContent = '0.0000 SOL';
+                            }
+
+                            console.log('Wallet connection restored:', walletAddress);
+                        } else {
+                            // Wallet changed, clear saved address
+                            localStorage.removeItem('phantom_wallet_address');
+                        }
+                    } catch (error) {
+                        // Wallet not connected, clear saved address
+                        localStorage.removeItem('phantom_wallet_address');
+                        console.log('Could not restore wallet connection:', error);
+                    }
+                }
+            }
+
+            // Restore wallet connection on page load
+            restoreWalletConnection();
+
+            // Generate Session ID
+            function generateSessionId() {
+                // Try to get existing session ID from localStorage
+                let existingSessionId = localStorage.getItem('ai_agent_session_id');
+                if (existingSessionId) {
+                    return existingSessionId;
+                }
+
+                // Generate new session ID if none exists
+                const newSessionId = 'session_' + Date.now() + '_' + Math.random().toString(36).substring(2, 9);
+                localStorage.setItem('ai_agent_session_id', newSessionId);
+                return newSessionId;
+            }
+
+            // Connect Phantom Wallet
+            async function connectPhantomWallet() {
+                try {
+                    console.log('Attempting to connect Phantom wallet...');
+
+                    // Check if Phantom is installed
+                    if (!window.solana) {
+                        console.log('Phantom wallet not detected');
+                        showNotification('Phantom Wallet not detected! Please install the Phantom extension first.', 'error');
+                        addMessage('system', '❌ Phantom Wallet not installed. Please install it from https://phantom.app/ and refresh this page.');
+                        return;
+                    }
+
+                    if (!window.solana.isPhantom) {
+                        showNotification('Please use Phantom Wallet', 'error');
+                        addMessage('system', '❌ Please use Phantom Wallet extension.');
+                        return;
+                    }
+
+                    console.log('Phantom detected, requesting connection...');
+
+                    // Request connection with explicit onlyIfTrusted set to false
+                    const response = await window.solana.connect({ onlyIfTrusted: false });
+
+                    console.log('Connection response:', response);
+
+                    walletPublicKey = response.publicKey;
+                    walletAddress = response.publicKey.toString();
+
+                    console.log('Wallet connected:', walletAddress);
+
+                    // Store wallet connection in localStorage
+                    localStorage.setItem('phantom_wallet_address', walletAddress);
+
+                    // Get balance
+                    await updateWalletBalance();
+
+                    // Update UI
+                    document.getElementById('walletStatusIndicator').classList.add('connected');
+                    document.getElementById('walletStatusText').textContent = 'Connected';
+                    document.getElementById('walletDetails').style.display = 'block';
+                    const shortAddress = walletAddress.substring(0, 4) + '...' + walletAddress.substring(walletAddress.length - 4);
+                    document.getElementById('walletAddress').textContent = shortAddress;
+                    document.getElementById('connectWalletBtn').style.display = 'none';
+                    document.getElementById('disconnectWalletBtn').style.display = 'block';
+                    // Pump.fun button removed
+                    document.getElementById('jupiterSwapBtn').style.display = 'block'; // Show Jupiter DEX button
+
+                    // Jupiter Plugin will be initialized on-demand when user clicks the button
+
+                    // Show prominent notification
+                    showNotification(`✅ Wallet Connected!\n\n💼 Address: ${shortAddress}\n💰 Balance: ${solBalance.toFixed(4)} SOL`, 'success');
+
+                } catch (error) {
+                    console.error('Wallet connection error:', error);
+                    console.error('Error details:', {
+                        code: error.code,
+                        message: error.message,
+                        name: error.name,
+                        stack: error.stack
+                    });
+
+                    // Handle specific error cases
+                    if (error.code === 4001 || error.code === -32603) {
+                        showNotification('Connection rejected. Please try again and approve the connection in Phantom.', 'error');
+                    } else if (error.message && error.message.includes('User rejected')) {
+                        showNotification('You rejected the wallet connection request', 'info');
+                    } else {
+                        const errorMsg = error.message || error.toString() || 'Unknown error';
+                        showNotification('Failed to connect wallet: ' + errorMsg, 'error');
+                    }
+                }
+            }
+
+            // Update Wallet Balance - Real Solana Blockchain Balance
+            async function updateWalletBalance() {
+                try {
+                    if (!walletPublicKey) {
+                        console.warn('No wallet connected');
+                        return;
+                    }
+
+                    // Get balance from backend proxy endpoint
+                    const response = await fetch(`/api/solana/balance/${walletPublicKey.toString()}`);
+                    const result = await response.json();
+                    if (!result.success) throw new Error(result.error);
+                    solBalance = result.balance / solanaWeb3.LAMPORTS_PER_SOL; // Convert lamports to SOL
+
+                    document.getElementById('walletBalance').textContent = solBalance.toFixed(4) + ' SOL';
+                    console.log('Real wallet balance:', solBalance, 'SOL');
+                } catch (error) {
+                    console.error('Failed to get balance from blockchain:', error);
+                    // Show 0 balance instead of error message
+                    document.getElementById('walletBalance').textContent = '0.0000 SOL';
+                    solBalance = 0;
+                }
+            }
+
+            // Disconnect Wallet
+            function disconnectWallet() {
+                walletAddress = null;
+                walletPublicKey = null;
+                solBalance = 0;
+
+                // Clear wallet from localStorage
+                localStorage.removeItem('phantom_wallet_address');
+
+                document.getElementById('walletStatusIndicator').classList.remove('connected');
+                document.getElementById('walletStatusText').textContent = 'Not Connected';
+                document.getElementById('walletDetails').style.display = 'none';
+                document.getElementById('connectWalletBtn').style.display = 'block';
+                document.getElementById('disconnectWalletBtn').style.display = 'none';
+                // Pump.fun button removed
+                document.getElementById('jupiterSwapBtn').style.display = 'none'; // Hide Jupiter DEX button
+                // Hide the Jupiter modal if it is currently open. The old code referenced a
+                // non‑existent `jupiter-plugin-container` which would cause a runtime error.
+                const jupiterModal = document.getElementById('jupiterModal');
+                if (jupiterModal) {
+                    jupiterModal.style.display = 'none';
+                }
+
+                showNotification('Wallet disconnected', 'info');
+            }
+
+            // Open Wallet on Solscan
+            function openWalletOnSolscan() {
+                if (walletAddress) {
+                    const solscanUrl = `https://solscan.io/account/${walletAddress}`;
+                    window.open(solscanUrl, '_blank');
+                    console.log('Opening wallet on Solscan:', walletAddress);
+                } else {
+                    showNotification('No wallet connected', 'error');
+                }
+            }
+
+            // Open Pump.fun Trading Page
+            // Pump.fun trading logic removed
+
+            // Open Jupiter DEX Swap
+            function openJupiterSwap() {
+                if (walletAddress) {
+                    // Show Jupiter modal in center of screen
+                    const modal = document.getElementById('jupiterModal');
+                    modal.style.display = 'flex';
+
+                    // Initialize plugin if not already done
+                    if (!window.jupiterPluginInitialized) {
+                        initializeJupiterPlugin();
+                    }
+
+                    showNotification('Jupiter Swap Opened', 'success');
+                } else {
+                    showNotification('Please connect your wallet first', 'error');
+                }
+            }
+
+            // Close Jupiter Modal
+            function closeJupiterModal() {
+                const modal = document.getElementById('jupiterModal');
+                modal.style.display = 'none';
+            }
+
+            // Close modal on Escape key
+            document.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape') {
+                    closeJupiterModal();
+                }
+            });
+
+            // Initialize Jupiter Plugin
+            function initializeJupiterPlugin() {
+                console.log('Attempting to initialize Jupiter Plugin...');
+                console.log('Jupiter available:', typeof window.Jupiter !== 'undefined');
+                console.log('Wallet connected:', !!walletPublicKey);
+
+                if (typeof window.Jupiter === 'undefined') {
+                    console.error('Jupiter Plugin not loaded yet. Please refresh the page.');
+                    showNotification('Jupiter Plugin not loaded. Please refresh the page.', 'error');
+                    return;
+                }
+
+                if (!walletPublicKey) {
+                    console.error('No wallet connected');
+                    showNotification('Please connect your wallet first', 'error');
+                    return;
+                }
+
+                try {
+                    window.Jupiter.init({
+                        displayMode: 'integrated',
+                        integratedTargetId: 'jupiter-plugin',
+                        endpoint: 'https://api.mainnet-beta.solana.com',
+                        enableWalletPassthrough: true,
+                        passthroughWalletContextState: {
+                            publicKey: walletPublicKey,
+                            connected: true,
+                            signTransaction: async (tx) => {
+                                return await window.solana.signTransaction(tx);
+                            },
+                            signAllTransactions: async (txs) => {
+                                return await window.solana.signAllTransactions(txs);
+                            },
+                            signMessage: async (message) => {
+                                return await window.solana.signMessage(message);
+                            }
+                        }
+                    });
+                    window.jupiterPluginInitialized = true;
+                    console.log('✅ Jupiter Plugin initialized successfully with wallet passthrough');
+                } catch (error) {
+                    console.error('❌ Failed to initialize Jupiter Plugin:', error);
+                    showNotification('Failed to initialize Jupiter Plugin: ' + error.message, 'error');
+                }
+            }
+
+            // Send Message
+            async function sendMessage() {
+                const input = document.getElementById('chatInput');
+                const message = input.value.trim();
+
+                if (!message || isAgentTyping) return;
+
+                // Hide welcome screen
+                document.getElementById('welcomeScreen').classList.add('hidden');
+
+                // Add user message to chat
+                addMessage('user', message);
+
+                // Clear input
+                input.value = '';
+                input.style.height = 'auto';
+
+                // Show typing indicator
+                showAgentTyping();
+
+                messageCount++;
+                document.getElementById('messageCount').textContent = messageCount;
+
+                try {
+                    // Get enabled MCP tools
+                    const enabledTools = getEnabledTools();
+                    
+                    // Call agent API
+                    const response = await fetch('http://localhost:3000/api/agent/chat', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            message,
+                            sessionId,
+                            walletAddress,
+                            enabledTools // Send list of enabled tools to backend
+                        })
+                    });
+
+                    const data = await response.json();
+
+                    if (data.success) {
+                        // Add AI response
+                        addMessage('ai', data.data.message, data.data.suggestedStrategy);
+
+                        // Update current strategy if provided
+                        if (data.data.suggestedStrategy) {
+                            currentStrategy = data.data.suggestedStrategy;
+
+                            // DEBUG: Log strategy details
+                            console.log('📋 [UI] Strategy received from AI:', {
+                                template: currentStrategy.template,
+                                config: currentStrategy.config,
+                                side: currentStrategy.config.side,
+                                isSell: currentStrategy.config.side === 'sell' || currentStrategy.config.sellAmountSOL !== undefined
+                            });
+
+                            // Update strategy status display
+                            const strategyName = getStrategyDisplayName(data.data.suggestedStrategy);
+                            updateStrategyStatus('creating', strategyName);
+
+                            // Show notification about strategy creation
+                            showNotification(`📋 Strategy Created: ${strategyName}`, 'success');
+                        }
+
+                        // REMOVED: Verbal activation logic
+                        // Users must use the "Activate" button - no verbal confirmation allowed for safety
+
+                        // Show "Activate" button if strategy requires confirmation
+                        if (data.data.requiresConfirmation && currentStrategy) {
+                            console.log('⏸️ Strategy configured - showing Activate button');
+                            showActivateStrategyButton(currentStrategy);
+                        }
+
+                        // REMOVED: Auto-execution on verbal commands
+                        // All execution must go through the Activate button with explicit confirmation dialog
+
+                        // Handle required actions
+                        if (data.data.requiresWallet && !walletAddress) {
+                            showNotification('Please connect your Phantom wallet to continue', 'info');
+                        }
+
+                    } else {
+                        addMessage('ai', 'Sorry, I encountered an error. Please try again.');
+                        showNotification('Error: ' + (data.error || 'Unknown error'), 'error');
+                    }
+
+                } catch (error) {
+                    console.error('Chat error:', error);
+                    addMessage('ai', "Sorry, I'm having trouble connecting. Please check if the server is running.");
+                    showNotification('Connection error: ' + error.message, 'error');
+                } finally {
+                    // Hide typing indicator
+                    hideAgentTyping();
+                }
+            }
+
+            // Add Message to Chat
+            function addMessage(type, content, strategy = null) {
+                const messagesContainer = document.getElementById('chatMessages');
+
+                const messageDiv = document.createElement('div');
+                messageDiv.className = `message ${type}`;
+
+                const avatar = document.createElement('div');
+                avatar.className = 'message-avatar';
+                avatar.textContent = type === 'user' ? '👤' : (type === 'system' ? '⚙️' : '🤖');
+
+                const contentDiv = document.createElement('div');
+                contentDiv.className = 'message-content';
+                contentDiv.innerHTML = formatMessage(content);
+
+                // Add strategy card if provided
+                if (strategy) {
+                    const strategyCard = createStrategyCard(strategy);
+                    contentDiv.appendChild(strategyCard);
+                }
+
+                messageDiv.appendChild(avatar);
+                messageDiv.appendChild(contentDiv);
+                messagesContainer.appendChild(messageDiv);
+
+                // Scroll to bottom
+                messagesContainer.scrollTop = messagesContainer.scrollHeight;
+            }
+
+            // Format message with markdown-like support
+            function formatMessage(text) {
+                // Convert code blocks
+                text = text.replace(/```([\s\S]*?)```/g, '<pre><code>$1</code></pre>');
+                // Convert inline code
+                text = text.replace(/`([^`]+)`/g, '<code>$1</code>');
+                // Convert bold text
+                text = text.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+                // Convert line breaks
+                text = text.replace(/\n/g, '<br>');
+                return text;
+            }
+
+            // Create Strategy Card
+            function createStrategyCard(strategy) {
+                const card = document.createElement('div');
+                card.className = 'strategy-card';
+
+                const header = document.createElement('div');
+                header.className = 'strategy-card-header';
+
+                const title = document.createElement('div');
+                title.className = 'strategy-card-title';
+
+                // Detect if this is a SELL strategy
+                const isSellStrategy = strategy.config.side === 'sell' || strategy.config.sellAmountSOL !== undefined;
+                const strategyType = isSellStrategy ? 'SELL' : 'BUY';
+                const strategyEmoji = isSellStrategy ? '💰' : '📊';
+
+                // Use proper display name from getStrategyDisplayName
+                const displayName = getStrategyDisplayName(strategy);
+                title.textContent = `${strategyEmoji} ${displayName.toUpperCase()} ${strategyType} Strategy`;
+
+                header.appendChild(title);
+                card.appendChild(header);
+
+                const body = document.createElement('div');
+                body.className = 'strategy-card-body';
+
+                // Display strategy parameters
+                for (const [key, value] of Object.entries(strategy.config)) {
+                    if (key === 'id' || key === 'side') continue; // Skip id and side (internal fields)
+
+                    const param = document.createElement('div');
+                    param.className = 'strategy-param';
+
+                    const label = document.createElement('span');
+                    label.className = 'strategy-param-label';
+                    label.textContent = formatParamName(key, strategy.config);
+
+                    const val = document.createElement('span');
+                    val.className = 'strategy-param-value';
+                    val.textContent = formatParamValue(key, value);
+
+                    param.appendChild(label);
+                    param.appendChild(val);
+                    body.appendChild(param);
+                }
+
+                card.appendChild(body);
+
+                // Action buttons
+                if (strategy.requiresConfirmation) {
+                    const actions = document.createElement('div');
+                    actions.className = 'action-buttons';
+
+                    const modifyBtn = document.createElement('button');
+                    modifyBtn.className = 'action-btn secondary';
+                    modifyBtn.textContent = '✏️ Modify';
+                    modifyBtn.onclick = () => {
+                        document.getElementById('chatInput').value = 'Can you modify this strategy to ';
+                        document.getElementById('chatInput').focus();
+                    };
+
+                    actions.appendChild(modifyBtn);
+                    card.appendChild(actions);
+                }
+
+                return card;
+            }
+
+            // Format parameter name
+            function formatParamName(key, config) {
+                // Handle specific field names for better display
+                const fieldNameMap = {
+                    'buyAmountSOL': 'Buy Amount SOL',
+                    'sellAmountSOL': 'Sell Amount SOL',
+                    'buyCount': 'Buy Count',
+                    'sellCount': 'Sell Count',
+                    'intervalMinutes': 'Interval Minutes'
+                };
+
+                // Check if we have a specific mapping
+                if (fieldNameMap[key]) {
+                    return fieldNameMap[key];
+                }
+
+                // Default: convert camelCase to Title Case
+                return key.replace(/([A-Z])/g, ' $1')
+                    .replace(/^./, str => str.toUpperCase())
+                    .trim();
+            }
+
+            // Format parameter value
+            function formatParamValue(key, value) {
+                if (key.includes('SOL')) return `${value} SOL`;
+                if (key.includes('Minutes')) return `${value} minutes`;
+                if (key.includes('Percentage')) return `${value}%`;
+                if (key.includes('Price')) return `$${value}`;
+                if (key.includes('Count')) return `${value} times`;
+                return value;
+            }
+
+            // Get display name for strategy
+            function getStrategyDisplayName(strategy) {
+                // For custom strategies, try to extract a meaningful name
+                if (strategy.template === 'custom') {
+                    const config = strategy.config;
+
+                    // Try to get name from description
+                    if (config.description) {
+                        const lines = config.description.split('\n');
+                        const nameLine = lines.find(line =>
+                            line.toLowerCase().includes('strategy name:') ||
+                            line.toLowerCase().includes('name:')
+                        );
+
+                        if (nameLine) {
+                            const nameMatch = nameLine.match(/[Ss]trategy [Nn]ame:\s*(.+)/) ||
+                                nameLine.match(/[Nn]ame:\s*(.+)/);
+                            if (nameMatch) {
+                                return nameMatch[1].trim();
+                            }
+                        }
+
+                        // Fallback: use first line of description if it looks like a title
+                        const firstLine = lines[0].trim();
+                        if (firstLine.length > 0 && firstLine.length < 100 && !firstLine.includes('.')) {
+                            return firstLine;
+                        }
+                    }
+
+                    // Try to get name from strategyType or id
+                    if (config.strategyType && config.strategyType !== 'custom') {
+                        return config.strategyType.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+                    }
+
+                    return `Custom Strategy (${config.id})`;
+                }
+
+                // For standard templates, create a readable name
+                const templateNames = {
+                    'dca': 'Dollar Cost Averaging',
+                    'grid': 'Grid Trading',
+                    'stop_loss': 'Stop-Loss Strategy',
+                    'momentum': 'Momentum Trading'
+                };
+
+                return templateNames[strategy.template] || strategy.template;
+            }
+
+
+            // Send Example Message
+            function sendExampleMessage(message) {
+                document.getElementById('chatInput').value = message;
+                sendMessage();
+            }
+
+            // The UI calls `useExamplePrompt()` when clicking on example prompt buttons in the
+            // welcome screen, but this function was never defined in the original code.
+            // Provide a simple wrapper around `sendExampleMessage` so those buttons work.
+            function useExamplePrompt(message) {
+                sendExampleMessage(message);
+            }
+
+            // Start New Chat
+            function startNewChat() {
+                if (confirm('Start a new chat? Current conversation will be cleared.')) {
+                    // Clear existing session ID from localStorage
+                    localStorage.removeItem('ai_agent_session_id');
+
+                    sessionId = generateSessionId();
+                    currentStrategy = null;
+                    messageCount = 0;
+
+                    document.getElementById('chatMessages').innerHTML = '';
+                    document.getElementById('welcomeScreen').classList.remove('hidden');
+                    document.getElementById('sessionId').textContent = sessionId.substring(0, 8);
+                    document.getElementById('messageCount').textContent = '0';
+
+                    // Reset strategy status
+                    updateStrategyStatus('idle');
+
+                    showNotification('New chat started - AI memory cleared', 'success');
+                    console.log('🆕 New session created:', sessionId);
+                }
+            }
+
+            // Handle Enter Key
+            function handleKeyDown(event) {
+                if (event.key === 'Enter' && !event.shiftKey) {
+                    event.preventDefault();
+                    sendMessage();
+                }
+            }
+
+            // Auto-resize textarea
+            document.getElementById('chatInput').addEventListener('input', function () {
+                // Reset height to auto to get the correct scrollHeight
+                this.style.height = 'auto';
+
+                // Calculate new height based on content
+                const newHeight = Math.min(this.scrollHeight, 200);
+                this.style.height = newHeight + 'px';
+
+                // Ensure the textarea is scrolled to show the cursor
+                const isAtMaxHeight = newHeight >= 200;
+                if (isAtMaxHeight) {
+                    this.scrollTop = this.scrollHeight;
+                }
+            });
+
+            // Show Notification
+            function showNotification(message, type = 'info') {
+                const container = document.getElementById('notificationContainer');
+
+                const notification = document.createElement('div');
+                notification.className = `notification ${type}`;
+                notification.textContent = message;
+
+                container.appendChild(notification);
+
+                // Auto-dismiss after 5 seconds (longer for wallet connection)
+                const duration = type === 'success' ? 6000 : 4000;
+
+                setTimeout(() => {
+                    notification.style.transition = 'all 0.4s ease-in-out';
+                    notification.style.opacity = '0';
+                    notification.style.transform = 'translateX(400px) scale(0.8)';
+                    setTimeout(() => notification.remove(), 400);
+                }, duration);
+            }
+
+            // Initial welcome message
+            setTimeout(() => {
+                if (messageCount === 0) {
+                    // Show welcome screen on load
+                }
+            }, 500);
+
+            console.log('🤖 AI Trading Agent initialized');
+            console.log('Session ID:', sessionId);
+            console.log('Ready to chat!');
+            console.log('Server:', 'http://localhost:3000');
+            console.log('Agent API:', 'http://localhost:3000/api/agent/chat');
+
+            // SOL Price Update Function - Use Backend API
+            async function updateSolPrice() {
+                try {
+                    console.log('Fetching SOL price from backend...');
+                    const response = await fetch('http://localhost:3000/api/price');
+
+                    if (!response.ok) {
+                        throw new Error(`Backend API error: ${response.status}`);
+                    }
+
+                    const data = await response.json();
+
+                    if (data.success) {
+                        const priceData = {
+                            price: data.price,
+                            change24h: 0 // Backend doesn't provide 24h change yet
+                        };
+                        console.log(`✅ Backend API success: $${priceData.price}`);
+
+                        if (priceData) {
+                            const priceElement = document.getElementById('solPrice');
+                            const changeElement = document.getElementById('solPriceChange');
+
+                            // Format price
+                            const formattedPrice = `$${priceData.price.toFixed(2)}`;
+                            priceElement.textContent = formattedPrice;
+
+                            // Format 24h change
+                            if (priceData.change24h !== 0) {
+                                const change = priceData.change24h;
+                                const changeText = `${change >= 0 ? '+' : ''}${change.toFixed(2)}%`;
+                                changeElement.textContent = changeText;
+                                changeElement.className = `sol-price-change ${change >= 0 ? 'positive' : 'negative'}`;
+                            } else {
+                                changeElement.textContent = 'Real-time';
+                                changeElement.className = 'sol-price-change';
+                            }
+
+                            // Animate price change
+                            if (lastSolPrice && lastSolPrice !== priceData.price) {
+                                priceElement.style.transform = 'scale(1.1)';
+                                priceElement.style.color = priceData.price > lastSolPrice ? 'var(--success-color)' : 'var(--error-color)';
+
+                                setTimeout(() => {
+                                    priceElement.style.transform = 'scale(1)';
+                                    priceElement.style.color = 'var(--success-color)';
+                                }, 300);
+                            }
+
+                            lastSolPrice = priceData.price;
+                            console.log(`SOL Price updated: ${formattedPrice}`);
+                        }
+                    } else {
+                        // Fallback to static price if backend fails
+                        const priceData = {
+                            price: 200.00, // Fallback SOL price
+                            change24h: 0
+                        };
+                        console.log(`⚠️ Using fallback price: $${priceData.price}`);
+
+                        const priceElement = document.getElementById('solPrice');
+                        const changeElement = document.getElementById('solPriceChange');
+
+                        priceElement.textContent = `$${priceData.price.toFixed(2)}`;
+                        changeElement.textContent = 'Fallback';
+                        changeElement.className = 'sol-price-change';
+
+                        lastSolPrice = priceData.price;
+                    }
+
+                } catch (error) {
+                    console.error('Failed to update SOL price:', error);
+
+                    // Fallback to static price on error
+                    const priceData = {
+                        price: 200.00, // Fallback SOL price
+                        change24h: 0
+                    };
+
+                    const priceElement = document.getElementById('solPrice');
+                    const changeElement = document.getElementById('solPriceChange');
+
+                    priceElement.textContent = `$${priceData.price.toFixed(2)}`;
+                    changeElement.textContent = 'Error';
+                    changeElement.className = 'sol-price-change error';
+
+                    lastSolPrice = priceData.price;
+                }
+            }
+
+
+            // Test server connection on load
+            fetch('http://localhost:3000/api/agent/stats')
+                .then(r => r.json())
+                .then(d => {
+                    console.log('✅ Server connection successful:', d);
+                    showNotification('Connected to AI server', 'success');
+
+                })
+                .catch(e => {
+                    console.error('❌ Server connection failed:', e);
+                    showNotification('Cannot connect to server. Is it running?', 'error');
+                });
+
+            // Keep currentStrategyId for strategy tracking
+            let currentStrategyId = null;
+
+            // ============================================
+            // PAPER TRADING FUNCTIONALITY
+            // ============================================
+
+            let currentPaperSessionId = null;
+            let paperTradingMode = 'paper'; // Default to paper mode
+            let paperMetricsInterval = null;
+
+            /**
+             * Initialize paper trading on page load
+             */
+            function initializePaperTrading() {
+                // Load saved mode from localStorage
+                const savedMode = localStorage.getItem('tradingMode');
+                if (savedMode) {
+                    paperTradingMode = savedMode;
+                    document.getElementById('paperTradingMode').checked = (savedMode === 'paper');
+                } else {
+                    // Default to paper mode for safety
+                    paperTradingMode = 'paper';
+                    document.getElementById('paperTradingMode').checked = true;
+                    localStorage.setItem('tradingMode', 'paper');
+                }
+
+                // Update UI to reflect current mode
+                updateModeDisplay();
+
+                // Load existing paper session if available
+                loadPaperTradingSession();
+
+                console.log(`📊 Paper Trading initialized in ${paperTradingMode.toUpperCase()} mode`);
+            }
+
+            /**
+             * Handle trading mode toggle
+             */
+            async function handleTradingModeChange() {
+                const toggle = document.getElementById('paperTradingMode');
+                const newMode = toggle.checked ? 'paper' : 'live';
+
+                // If switching to live mode, show warning
+                if (newMode === 'live') {
+                    const confirmed = await showLiveModeWarning();
+                    if (!confirmed) {
+                        // User cancelled, revert toggle
+                        toggle.checked = true;
+                        return;
+                    }
+                }
+
+                // Update mode
+                paperTradingMode = newMode;
+                localStorage.setItem('tradingMode', newMode);
+
+                // Update UI
+                updateModeDisplay();
+
+                // If switching to paper mode, load or create session
+                if (newMode === 'paper') {
+                    await loadPaperTradingSession();
+                } else {
+                    // Stop paper metrics updates
+                    if (paperMetricsInterval) {
+                        clearInterval(paperMetricsInterval);
+                        paperMetricsInterval = null;
+                    }
+                }
+
+                showNotification(
+                    `✅ Switched to ${newMode.toUpperCase()} mode`,
+                    newMode === 'paper' ? 'success' : 'warning'
+                );
+
+                console.log(`🔄 Trading mode switched to: ${newMode.toUpperCase()}`);
+            }
+
+            /**
+             * Update mode display elements
+             */
+            function updateModeDisplay() {
+                const paperBadge = document.getElementById('paperBadge');
+                const liveBadge = document.getElementById('liveBadge');
+                const modeInfo = document.getElementById('modeInfo');
+
+                if (paperTradingMode === 'paper') {
+                    paperBadge.style.display = 'inline-flex';
+                    liveBadge.style.display = 'none';
+                    modeInfo.innerHTML = '<p style="margin: 0; font-size: 11px; color: var(--text-secondary);">✅ Paper mode active - All trades are simulated with real market data. No blockchain transactions will be executed.</p>';
+                    modeInfo.style.background = 'rgba(16, 185, 129, 0.1)';
+                    modeInfo.style.borderColor = 'rgba(16, 185, 129, 0.2)';
+                } else {
+                    paperBadge.style.display = 'none';
+                    liveBadge.style.display = 'inline-flex';
+                    modeInfo.innerHTML = '<p style="margin: 0; font-size: 11px; color: var(--text-secondary);">⚠️ LIVE mode active - All trades use real funds and execute on the Solana blockchain.</p>';
+                    modeInfo.style.background = 'rgba(239, 68, 68, 0.1)';
+                    modeInfo.style.borderColor = 'rgba(239, 68, 68, 0.2)';
+                }
+            }
+
+            /**
+             * Load or create paper trading session
+             */
+            async function loadPaperTradingSession() {
+                try {
+                    // Check if we have an active session
+                    if (currentPaperSessionId) {
+                        const response = await fetch(`/api/v1/paper-trading/sessions/${currentPaperSessionId}`);
+                        if (response.ok) {
+                            const session = await response.json();
+                            console.log('📊 Loaded existing paper session:', session);
+                            updatePaperTradingMetrics(session);
+                            startPaperMetricsPolling();
+                            return;
+                        }
+                    }
+
+                    // No active session, create new one
+                    const newSessionId = `paper-ui-${Date.now()}`;
+                    const response = await fetch('/api/v1/paper-trading/sessions', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            sessionId: newSessionId,
+                            userId: walletAddress || 'anonymous',
+                            strategyId: null,
+                            config: {
+                                initialBalanceSOL: 10.0,
+                                initialBalanceUSDC: 1000.0, // User starts with $1000 USD
+                                enableSlippage: true,
+                                slippageBps: 50,
+                                enableFees: true,
+                                takerFeeBps: 25,
+                                makerFeeBps: 0,
+                                priceImpactBps: 10
+                            }
+                        })
+                    });
+
+                    if (!response.ok) {
+                        const errorData = await response.json();
+                        throw new Error(`Failed to create paper session: ${errorData.error || response.statusText}`);
+                    }
+
+                    const data = await response.json();
+                    currentPaperSessionId = data.data.session.sessionId;
+                    localStorage.setItem('paperSessionId', currentPaperSessionId);
+
+                    console.log('✅ Created new paper session:', currentPaperSessionId);
+                    updatePaperTradingMetrics(data.data.session);
+                    startPaperMetricsPolling();
+
+                } catch (error) {
+                    console.error('❌ Failed to load paper session:', error);
+                    showNotification('Failed to initialize paper trading session', 'error');
+                }
+            }
+
+            /**
+             * Reset paper trading session (clear old session and create new one)
+             */
+            async function resetPaperTradingSession() {
+                try {
+                    // Delete old session if exists
+                    if (currentPaperSessionId) {
+                        try {
+                            await fetch(`/api/v1/paper-trading/sessions/${currentPaperSessionId}`, {
+                                method: 'DELETE'
+                            });
+                            console.log('🗑️ Deleted old paper session:', currentPaperSessionId);
+                        } catch (error) {
+                            console.warn('Failed to delete old session:', error);
+                        }
+                    }
+
+                    // Clear from storage
+                    localStorage.removeItem('paperSessionId');
+                    currentPaperSessionId = null;
+
+                    // Create new session
+                    await loadPaperTradingSession();
+
+                    showNotification('✅ Paper trading session reset successfully!', 'success');
+                } catch (error) {
+                    console.error('❌ Failed to reset paper session:', error);
+                    showNotification('Failed to reset paper trading session', 'error');
+                }
+            }
+
+            /**
+             * Start polling for paper trading metrics
+             */
+            function startPaperMetricsPolling() {
+                if (paperMetricsInterval) {
+                    clearInterval(paperMetricsInterval);
+                }
+
+                paperMetricsInterval = setInterval(async () => {
+                    if (currentPaperSessionId && paperTradingMode === 'paper') {
+                        try {
+                            const response = await fetch(`/api/v1/paper-trading/sessions/${currentPaperSessionId}`);
+                            if (response.ok) {
+                                const session = await response.json();
+                                updatePaperTradingMetrics(session);
+                            }
+                        } catch (error) {
+                            console.error('❌ Failed to fetch paper metrics:', error);
+                        }
+                    }
+                }, 5000); // Update every 5 seconds
+            }
+
+            /**
+             * Update paper trading metrics display
+             */
+            function updatePaperTradingMetrics(data) {
+                // Handle nested response structure: data.data.session or direct data
+                const session = data.data?.session || data.session || data;
+                const metrics = session.metrics || data;
+                const portfolio = session.portfolio || {};
+
+                console.log('📊 updatePaperTradingMetrics called with metrics:', {
+                    totalTrades: metrics.totalTrades,
+                    winRate: metrics.winRate,
+                    profitFactor: metrics.profitFactor,
+                    sharpeRatio: metrics.sharpeRatio,
+                    winningTrades: metrics.winningTrades,
+                    losingTrades: metrics.losingTrades
+                });
+
+                // Update balance - check portfolio first, then metrics
+                const balanceSOL = portfolio.balanceSOL ?? metrics.currentBalanceSOL ?? 0;
+                const balanceUSDC = portfolio.balanceUSDC ?? metrics.currentBalanceUSD ?? 0;
+
+                document.getElementById('paperBalance').textContent =
+                    `${balanceSOL.toFixed(4)} SOL / ${balanceUSDC.toFixed(2)} USDC`;
+
+                // Update P&L - Use USD values
+                const totalPnL = metrics.totalPnLUSD || metrics.totalPnL || 0;
+                const pnlElement = document.getElementById('paperPnL');
+                pnlElement.textContent = `${totalPnL >= 0 ? '+' : ''}${totalPnL.toFixed(2)} USD`;
+                pnlElement.className = `metric-value ${totalPnL >= 0 ? 'profit' : 'loss'}`;
+
+                // Update ROI - Use roi (total value change) not totalPnLPercentage (realized only)
+                const roi = metrics.roi || metrics.totalPnLPercentage || 0;
+                const roiElement = document.getElementById('paperROI');
+                roiElement.textContent = `${roi >= 0 ? '+' : ''}${roi.toFixed(2)}%`;
+                roiElement.className = `metric-value ${roi >= 0 ? 'profit' : 'loss'}`;
+
+                // Update trades
+                const totalTrades = metrics.totalTrades || 0;
+                const winRate = metrics.winRate || 0;
+                document.getElementById('paperTrades').textContent =
+                    `${totalTrades} (${winRate.toFixed(1)}% win)`;
+
+                // CRITICAL FIX: Also update RIGHT panel and Advanced Metrics with the same data!
+                updateLiveMetrics({
+                    executions: metrics.totalTrades || 0,
+                    pnl: metrics.totalPnLUSD || metrics.totalPnL || 0,
+                    roi: metrics.roi || metrics.totalPnLPercentage || 0,
+                    winRate: metrics.winRate || 0,
+                    profitFactor: metrics.profitFactor || 0,
+                    sharpeRatio: metrics.sharpeRatio || 0,
+                    maxDrawdown: metrics.maxDrawdown || 0,
+                    averageWin: metrics.averageWin || 0,
+                    averageLoss: metrics.averageLoss || 0,
+                    winningTrades: metrics.winningTrades || 0,
+                    losingTrades: metrics.losingTrades || 0,
+                    totalFeesUSD: metrics.totalFeesUSD || 0,
+                    executionsPerMin: metrics.duration > 0 
+                        ? (metrics.totalTrades / (metrics.duration / 60000)) 
+                        : 0
+                });
+            }
+
+            /**
+             * Show warning modal when switching to live mode
+             */
+            function showLiveModeWarning() {
+                return new Promise((resolve) => {
+                    // Create modal
+                    const modal = document.createElement('div');
+                    modal.className = 'mode-warning-modal';
+                    modal.innerHTML = `
+                    <div class="mode-warning-content">
+                        <div class="warning-header">
+                            <span class="warning-icon">⚠️</span>
+                            <h3 class="warning-title">Switch to LIVE Trading?</h3>
+                        </div>
+                        <p class="warning-message">
+                            You are about to switch to <strong>LIVE trading mode</strong>. 
+                            All future trades will use real funds and execute on the Solana blockchain.
+                            <br><br>
+                            Make sure you understand the risks involved.
+                        </p>
+                        <div class="warning-buttons">
+                            <button class="warning-btn warning-btn-cancel" id="warningCancel">Cancel</button>
+                            <button class="warning-btn warning-btn-confirm" id="warningConfirm">Switch to LIVE</button>
+                        </div>
+                    </div>
+                `;
+
+                    document.body.appendChild(modal);
+
+                    // Handle buttons
+                    const warningCancelBtn = modal.querySelector('#warningCancel');
+                    const warningConfirmBtn = modal.querySelector('#warningConfirm');
+
+                    warningCancelBtn.addEventListener('click', () => {
+                        document.body.removeChild(modal);
+                        resolve(false);
+                    });
+
+                    warningConfirmBtn.addEventListener('click', () => {
+                        document.body.removeChild(modal);
+                        resolve(true);
+                    });
+
+                    // Close on background click
+                    modal.addEventListener('click', (e) => {
+                        if (e.target === modal) {
+                            document.body.removeChild(modal);
+                            resolve(false);
+                        }
+                    });
+                });
+            }
+
+            /**
+             * Add trade to live feed in right panel (redirects to the main function)
+             */
+            function addTradeToFeed(trade) {
+                // Redirect to the live feed function
+                addTradeToLiveFeed(trade);
+            }
+
+            /**
+             * Clear trade feed
+             */
+            function clearTradeFeed() {
+                const feedList = document.getElementById('tradeFeedList');
+                if (!feedList) return;
+
+                // Remove all trade items
+                const entries = feedList.getElementsByClassName('trade-item');
+                while (entries.length > 0) {
+                    feedList.removeChild(entries[0]);
+                }
+
+                // Show empty message
+                feedList.innerHTML = '<div class="trade-feed-empty" style="text-align: center; padding: 20px; color: rgba(255,255,255,0.5); font-size: 13px;">No trades yet</div>';
+            }
+
+            /**
+             * WebSocket listeners for paper trading events
+             */
+            socket.on('paper:trade:executed', (data) => {
+                if (data.sessionId === currentPaperSessionId) {
+                    const allKeys = Object.keys(data);
+                    console.log('🔍 [WebSocket] paper:trade:executed RAW DATA:', {
+                        topLevelKeys: allKeys,
+                        topLevelKeysString: allKeys.join(', '),
+                        hasMetrics: !!data.metrics,
+                        hasDataProperty: !!data.data,
+                        hasSessionProperty: !!data.session,
+                        sessionId: data.sessionId,
+                        side: data.side,
+                        metricsValue: data.metrics,
+                        dataKeys: data.data ? Object.keys(data.data) : null
+                    });
+
+                    console.log('🔍 [WebSocket] paper:trade:executed received:', {
+                        hasMetrics: !!data.metrics,
+                        metricsKeys: data.metrics ? Object.keys(data.metrics) : [],
+                        sampleMetrics: data.metrics ? {
+                            totalTrades: data.metrics.totalTrades,
+                            roi: data.metrics.roi,
+                            winRate: data.metrics.winRate,
+                            profitFactor: data.metrics.profitFactor,
+                            sharpeRatio: data.metrics.sharpeRatio,
+                            winningTrades: data.metrics.winningTrades,
+                            losingTrades: data.metrics.losingTrades,
+                            totalFeesUSD: data.metrics.totalFeesUSD,
+                            executionsPerMin: data.metrics.executionsPerMin
+                        } : null
+                    });
+
+                    // Safety check for metrics object with fallback to alternate locations
+                    // UPDATED: Support BOTH flattened metrics (top-level) AND nested metrics object
+                    if (!data.metrics) {
+                        // Try to extract metrics from different possible locations
+                        data.metrics = data.data?.metrics || data.session?.metrics || null;
+                        
+                        if (!data.metrics) {
+                            // Check if metrics are flattened at top level (NEW production-ready format)
+                            if (data.winRate !== undefined || data.profitFactor !== undefined || data.totalTrades !== undefined) {
+                                console.log('✅ [WebSocket] Detected FLATTENED metrics at top level (production format)');
+                                // Create metrics object from top-level properties
+                                data.metrics = {
+                                    totalTrades: data.totalTrades || 0,
+                                    roi: data.roi || 0,
+                                    totalPnLPercentage: data.roi || 0,
+                                    totalPnL: data.realizedPnL || 0,
+                                    totalPnLUSD: data.realizedPnLUSD || 0,
+                                    winRate: data.winRate || 0,
+                                    profitFactor: data.profitFactor || 0,
+                                    sharpeRatio: data.sharpeRatio || 0,
+                                    maxDrawdown: data.maxDrawdown || 0,
+                                    averageWin: data.avgWin || 0,
+                                    averageLoss: data.avgLoss || 0,
+                                    winningTrades: data.winningTrades || 0,
+                                    losingTrades: data.losingTrades || 0,
+                                    totalFeesUSD: data.totalFeesUSD || 0,
+                                    executionsPerMin: data.executionsPerMin || 0
+                                };
+                            } else {
+                                console.error('❌ Cannot find metrics in paper:trade:executed event (neither nested nor flattened)');
+                                console.error('Full data object:', data);
+                                return;
+                            }
+                        }
+                    }
+                    
+                    // Store metrics in a single source of truth
+                    const tradeMetrics = {
+                        executions: data.metrics.totalTrades || 0,
+                        pnl: data.metrics.totalPnLUSD || data.metrics.totalPnL || 0,
+                        roi: data.metrics.roi || data.metrics.totalPnLPercentage || 0,
+                        winRate: data.metrics.winRate || 0,
+                        
+                        // Enhanced metrics
+                        profitFactor: data.metrics.profitFactor || 0,
+                        sharpeRatio: data.metrics.sharpeRatio || 0,
+                        maxDrawdown: data.metrics.maxDrawdown || 0,
+                        averageWin: data.metrics.averageWin || 0,
+                        averageLoss: data.metrics.averageLoss || 0,
+                        winningTrades: data.metrics.winningTrades || 0,
+                        losingTrades: data.metrics.losingTrades || 0,
+                        totalFeesUSD: data.metrics.totalFeesUSD || 0,
+                        executionsPerMin: data.metrics.executionsPerMin || 0,
+                    };
+
+                    console.log('📊 Extracted tradeMetrics for update:', tradeMetrics);
+
+                    // Update RIGHT PANEL with exact same values
+                    updateLiveMetrics(tradeMetrics);
+
+                    // Update LEFT PANEL with the SAME metrics object
+                    updatePaperTradingMetrics({ metrics: data.metrics });
+
+                    // CRITICAL FIX: Also update Advanced Metrics directly with all available data
+                    updateAdvancedMetrics({
+                        profitFactor: data.metrics.profitFactor || 0,
+                        sharpeRatio: data.metrics.sharpeRatio || 0,
+                        maxDrawdown: data.metrics.maxDrawdown || 0,
+                        averageWin: data.metrics.averageWin || 0,
+                        averageLoss: data.metrics.averageLoss || 0,
+                        executionsPerMin: data.metrics.executionsPerMin || 0,
+                        winningTrades: data.metrics.winningTrades || 0,
+                        losingTrades: data.metrics.losingTrades || 0,
+                        totalFeesUSD: data.metrics.totalFeesUSD || 0
+                    });
+
+                    // Add to live trade feed in RIGHT PANEL with enhanced display
+                    const tradeForFeed = {
+                        side: data.side,
+                        type: data.side,
+                        amount: data.amount,
+                        amountSOL: data.amountSOL,
+                        amountTokens: data.amountTokens || data.position?.size || data.position?.totalPositionSize || 0, // Try multiple sources
+                        price: data.price,
+                        priceUSD: data.priceUSD,
+                        tokenSymbol: data.tokenSymbol || data.quoteToken || data.position?.tokenSymbol || data.baseToken || 'TOKEN', // Try tokenSymbol first, then quoteToken
+                        timestamp: data.timestamp || Date.now(),
+                        
+                        // Enhanced trade info
+                        executionTimeMs: data.executionTimeMs,
+                        fees: data.fees,
+                        slippage: data.slippage,
+                        position: data.position,
+                        balanceDeltas: data.balanceDeltas, // Include balance deltas
+                    };
+                    
+                    console.log('🔍 [DEBUG] tradeForFeed being sent to display:', tradeForFeed);
+                    console.log('🔍 [DEBUG] amountTokens sources:', {
+                        'data.amountTokens': data.amountTokens,
+                        'data.position?.size': data.position?.size,
+                        'data.position?.totalPositionSize': data.position?.totalPositionSize,
+                        'data.balanceDeltas?.tokenDelta': data.balanceDeltas?.tokenDelta,
+                        'FINAL amountTokens': tradeForFeed.amountTokens
+                    });
+                    
+                    // IMPORTANT: Check if user is trying to buy SOL with SOL (invalid)
+                    if (data.tokenSymbol === 'SOL' && data.side === 'buy') {
+                        console.warn('⚠️ WARNING: Attempting to buy SOL with SOL. This is invalid!');
+                        console.warn('⚠️ You need to specify a real token address (like a meme coin) in your strategy.');
+                        console.warn('⚠️ Example: "Token Address: EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"');
+                    }
+                    
+                    addTradeToLiveFeed(tradeForFeed);
+
+                    // Show detailed notification
+                    const tradeType = data.side.toUpperCase();
+                    const amount = data.amount.toFixed(4);
+                    const amountUSD = data.amountUSD ? `($${data.amountUSD.toFixed(2)})` : '';
+                    const symbol = data.baseToken;
+                    const roi = tradeMetrics.roi.toFixed(2);
+                    const executionTime = data.executionTimeMs ? ` in ${data.executionTimeMs}ms` : '';
+                    
+                    showNotification(
+                        `📊 Paper ${tradeType}: ${amount} ${symbol} ${amountUSD}${executionTime}\n` +
+                        `ROI: ${roi}% | Win Rate: ${tradeMetrics.winRate.toFixed(1)}% | P&L: $${tradeMetrics.pnl.toFixed(2)}`,
+                        'info'
+                    );
+                }
+            });
+
+            socket.on('paper:metrics:update', (data) => {
+                if (data.sessionId === currentPaperSessionId) {
+                    console.log('📊 paper:metrics:update received:', data.metrics);
+                    updatePaperTradingMetrics(data.metrics);
+                    
+                    // CRITICAL FIX: Update Advanced Metrics and RIGHT panel from metrics update
+                    if (data.metrics) {
+                        // Update RIGHT panel with correct metrics
+                        updateLiveMetrics({
+                            executions: data.metrics.totalTrades || 0,
+                            pnl: data.metrics.totalPnLUSD || data.metrics.totalPnL || 0,
+                            roi: data.metrics.roi || data.metrics.totalPnLPercentage || 0,
+                            winRate: data.metrics.winRate || 0,
+                            profitFactor: data.metrics.profitFactor || 0,
+                            sharpeRatio: data.metrics.sharpeRatio || 0,
+                            maxDrawdown: data.metrics.maxDrawdown || 0,
+                            averageWin: data.metrics.averageWin || 0,
+                            averageLoss: data.metrics.averageLoss || 0,
+                            winningTrades: data.metrics.winningTrades || 0,
+                            losingTrades: data.metrics.losingTrades || 0,
+                            totalFeesUSD: data.metrics.totalFeesUSD || 0,
+                            executionsPerMin: data.metrics.executionsPerMin || 0
+                        });
+                    }
+                }
+            });
+
+            socket.on('paper:simulation:update', (data) => {
+                console.log('🔍 [DEBUG] paper:simulation:update received:', data);
+                
+                if (data.sessionId === currentPaperSessionId && data.portfolioSnapshot) {
+                    const snapshot = data.portfolioSnapshot;
+                    const strategyInfo = data.strategyInfo || {};
+                    const marketData = data.marketData || {};
+
+                    // ADD SIMULATION ACTIVITY TO LIVE FEED
+                    if (data.tradeDetails) {
+                        const trade = data.tradeDetails;
+                        
+                        console.log('🔍 [DEBUG] Simulation tradeDetails:', {
+                            type: trade.type,
+                            amountSOL: trade.amountSOL,
+                            amountTokens: trade.amountTokens,
+                            tokensReceived: trade.tokensReceived,
+                            tokenSymbol: data.tokenSymbol,
+                            currentPriceUSD: data.currentPriceUSD
+                        });
+                        
+                        // Add simulation event to trade feed with enhanced info
+                        addSimulationToLiveFeed({
+                            type: trade.type || 'simulation',
+                            side: trade.type,
+                            amount: trade.amountTokens || trade.tokensReceived || trade.amount || 0, // Check tokensReceived too
+                            amountSOL: trade.solReceived || trade.amountSOL || 0,
+                            amountTokens: trade.amountTokens || trade.tokensReceived || 0, // Check tokensReceived too
+                            price: trade.executionPrice || 0,
+                            priceUSD: data.currentPriceUSD || 0,
+                            tokenSymbol: data.tokenSymbol || 'TOKEN',
+                            timestamp: trade.timestamp || Date.now(),
+                            isSimulation: true,
+                            
+                            // Enhanced simulation details
+                            marketImpact: trade.marketImpact || 0,
+                            slippage: trade.slippage || 0,
+                            executionQuality: trade.executionQuality || 100,
+                        });
+                    }
+
+                    // IMPORTANT: Only update metrics from simulation if it's NOT immediately after a trade
+                    // paper:trade:executed should be the primary source of truth for metrics after trades
+                    // This prevents the simulation update from overwriting trade metrics with slightly different values
+                    
+                    // Only update if this is a periodic update (not buy_simulation or sell_simulation after a trade)
+                    if (data.type !== 'buy_simulation' && data.type !== 'sell_simulation') {
+                        const enhancedMetrics = {
+                            executions: strategyInfo.executionCount || 0,
+                            pnl: snapshot.totalPnLUSD || snapshot.totalPnL || 0,
+                            roi: snapshot.roi || 0,
+                            winRate: 0, // Win rate not available in simulation updates
+                            
+                            // Enhanced financial details
+                            unrealizedPnL: snapshot.unrealizedPnLUSD || 0,
+                            realizedPnL: snapshot.realizedPnLUSD || 0,
+                            totalValue: snapshot.totalValueUSD || 0,
+                            
+                            // Capital utilization
+                            capitalUtilization: snapshot.capitalUtilization?.utilizationPercentage || 0,
+                            availableCash: snapshot.capitalUtilization?.availableCash || 0,
+                            
+                            // Allocation
+                            solAllocation: snapshot.allocation?.solPercentage || 0,
+                            usdcAllocation: snapshot.allocation?.usdcPercentage || 0,
+                            tokenAllocation: snapshot.allocation?.tokenPercentage || 0,
+                        };
+                        
+                        updateLiveMetrics(enhancedMetrics);
+                    }
+                }
+            });
+
+
+            // Initialize paper trading when page loads
+            document.addEventListener('DOMContentLoaded', () => {
+                initializePaperTrading();
+
+                // Add event listener to toggle
+                const toggle = document.getElementById('paperTradingMode');
+                if (toggle) {
+                    toggle.addEventListener('change', handleTradingModeChange);
+                }
+
+                // Initialize MCP tools state
+                loadMCPToolsState();
+
+                // Initialize strategy panel as collapsed
+                const resizeHandle = document.getElementById('resizeHandle');
+                if (resizeHandle) {
+                    resizeHandle.style.display = 'none'; // Hide resize handle initially
+                }
+
+                // Initialize toggle button rotation for collapsed state
+                const toggleBtn = document.querySelector('.toggle-panel-btn svg');
+                if (toggleBtn) {
+                    toggleBtn.style.transform = 'rotate(180deg)';
+                }
+            });
+
+            // Export mode for use in strategy execution
+            window.getPaperTradingMode = () => paperTradingMode;
+            window.getCurrentPaperSessionId = () => currentPaperSessionId;
+
+
+            // ==========================================
+            // MCP TOOLS FUNCTIONALITY
+            // ==========================================
+
+            // Store enabled/disabled state of tools
+            let mcpToolsState = {
+                getTokenInfo: true,
+                buyToken: true,
+                sellToken: true,
+                listAccounts: true,
+                getAccountBalance: true,
+                createAccount: true,
+                importAccount: true,
+                getTransactionHistory: true,
+                getPortfolioSummary: true
+            };
+
+            /**
+             * Load MCP tools state from localStorage
+             */
+            function loadMCPToolsState() {
+                const savedState = localStorage.getItem('mcpToolsState');
+                if (savedState) {
+                    try {
+                        mcpToolsState = JSON.parse(savedState);
+                        console.log('🔧 Loaded MCP tools state:', mcpToolsState);
+                        
+                        // Apply loaded state to checkboxes
+                        Object.keys(mcpToolsState).forEach(toolName => {
+                            const checkbox = document.getElementById(`tool-${toolName}`);
+                            if (checkbox) {
+                                checkbox.checked = mcpToolsState[toolName];
+                            }
+                        });
+                        
+                        updateToolsCount();
+                    } catch (error) {
+                        console.error('❌ Error loading MCP tools state:', error);
+                    }
+                }
+            }
+
+            /**
+             * Save MCP tools state to localStorage
+             */
+            function saveMCPToolsState() {
+                localStorage.setItem('mcpToolsState', JSON.stringify(mcpToolsState));
+                console.log('💾 Saved MCP tools state:', mcpToolsState);
+            }
+
+            /**
+             * Handle individual tool toggle
+             */
+            function handleToolToggle(toolName, isEnabled) {
+                mcpToolsState[toolName] = isEnabled;
+                saveMCPToolsState();
+                updateToolsCount();
+
+                // Add visual feedback
+                const toolItem = document.querySelector(`#tool-${toolName}`).closest('.mcp-tool-item');
+                if (toolItem) {
+                    toolItem.classList.remove('tool-enabled', 'tool-disabled');
+                    toolItem.classList.add(isEnabled ? 'tool-enabled' : 'tool-disabled');
+                    
+                    // Remove animation class after animation completes
+                    setTimeout(() => {
+                        toolItem.classList.remove('tool-enabled', 'tool-disabled');
+                    }, 300);
+                }
+
+                // Show notification
+                const toolDisplayName = toolName.replace(/([A-Z])/g, '-$1').toLowerCase().substring(1);
+                showNotification(
+                    `${isEnabled ? '✅ Enabled' : '❌ Disabled'} ${toolDisplayName} tool`,
+                    isEnabled ? 'success' : 'info'
+                );
+                console.log(`🔧 Tool ${toolName}: ${isEnabled ? 'ENABLED' : 'DISABLED'}`);
+            }
+
+            /**
+             * Toggle all tools on/off
+             */
+            function toggleAllTools(enable) {
+                Object.keys(mcpToolsState).forEach(toolName => {
+                    mcpToolsState[toolName] = enable;
+                    const checkbox = document.getElementById(`tool-${toolName}`);
+                    if (checkbox) {
+                        checkbox.checked = enable;
+                    }
+                });
+
+                saveMCPToolsState();
+                updateToolsCount();
+
+                // Update button text
+                const btn = document.getElementById('disableAllToolsBtn');
+                if (btn) {
+                    btn.textContent = enable ? 'Disable all' : 'Enable all';
+                    btn.onclick = () => toggleAllTools(!enable);
+                }
+
+                showNotification(
+                    `${enable ? '✅ Enabled' : '❌ Disabled'} all MCP tools`,
+                    enable ? 'success' : 'warning'
+                );
+
+                console.log(`🔧 All tools ${enable ? 'ENABLED' : 'DISABLED'}`);
+            }
+
+            /**
+             * Update enabled tools count display
+             */
+            function updateToolsCount() {
+                const enabledCount = Object.values(mcpToolsState).filter(enabled => enabled).length;
+                const countElement = document.getElementById('enabledToolsCount');
+                if (countElement) {
+                    countElement.textContent = enabledCount;
+                    
+                    // Change color based on count
+                    if (enabledCount === 0) {
+                        countElement.style.color = 'var(--error-color)';
+                    } else if (enabledCount < 5) {
+                        countElement.style.color = 'var(--warning-color)';
+                    } else {
+                        countElement.style.color = 'var(--success-color)';
+                    }
+                }
+
+                // Update disable all button based on current state
+                const allEnabled = Object.values(mcpToolsState).every(enabled => enabled);
+                const btn = document.getElementById('disableAllToolsBtn');
+                if (btn) {
+                    btn.textContent = allEnabled ? 'Disable all' : 'Enable all';
+                    btn.onclick = () => toggleAllTools(!allEnabled);
+                }
+            }
+
+            /**
+             * Check if a specific tool is enabled
+             */
+            function isToolEnabled(toolName) {
+                return mcpToolsState[toolName] === true;
+            }
+
+            /**
+             * Get list of enabled tools
+             */
+            function getEnabledTools() {
+                return Object.keys(mcpToolsState).filter(toolName => mcpToolsState[toolName]);
+            }
+
+            // Make tool state checker available globally for agent to use
+            window.isToolEnabled = isToolEnabled;
+            window.getEnabledTools = getEnabledTools;
+
+
+            // ==========================================
+            // SPLIT PANEL FUNCTIONALITY
+            // ==========================================
+
+            let isPanelCollapsed = true; // Start collapsed by default
+
+            // Toggle Strategy Panel
+            function toggleStrategyPanel() {
+                const panel = document.getElementById('strategyPanel');
+                const btn = document.querySelector('.toggle-panel-btn svg');
+                const resizeHandle = document.getElementById('resizeHandle');
+
+                // Mobile behavior
+                if (window.innerWidth <= 1024) {
+                    panel.classList.toggle('open');
+                    return;
+                }
+
+                // Desktop behavior
+                isPanelCollapsed = !isPanelCollapsed;
+
+                if (isPanelCollapsed) {
+                    panel.classList.add('collapsed');
+                    if (btn) btn.style.transform = 'rotate(180deg)';
+                    if (resizeHandle) resizeHandle.style.display = 'none';
+                } else {
+                    panel.classList.remove('collapsed');
+                    if (btn) btn.style.transform = 'rotate(0deg)';
+                    if (resizeHandle) resizeHandle.style.display = 'block';
+                }
+            }
+
+            // Show "Activate Strategy" button when strategy is ready
+            function showActivateStrategyButton(strategy) {
+                console.log('🎯 Showing Activate Strategy button for:', strategy);
+                
+                // Remove any existing activate button
+                const existingButton = document.querySelector('.activate-strategy-button-container');
+                if (existingButton) {
+                    existingButton.remove();
+                }
+
+                // Create button container
+                const buttonContainer = document.createElement('div');
+                buttonContainer.className = 'activate-strategy-button-container';
+                buttonContainer.style.cssText = `
+                    display: flex;
+                    justify-content: center;
+                    align-items: center;
+                    gap: 12px;
+                    margin: 20px 0;
+                    padding: 20px;
+                    background: linear-gradient(135deg, rgba(102, 126, 234, 0.1), rgba(118, 75, 162, 0.1));
+                    border: 2px solid rgba(102, 126, 234, 0.3);
+                    border-radius: 16px;
+                    animation: pulse-border 2s infinite;
+                `;
+
+                // Create Activate button
+                const activateButton = document.createElement('button');
+                activateButton.className = 'activate-strategy-button';
+                activateButton.innerHTML = `
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M5 12h14M12 5l7 7-7 7"/>
+                    </svg>
+                    <span>Activate Strategy</span>
+                `;
+                activateButton.style.cssText = `
+                    flex: 1;
+                    max-width: 200px;
+                    padding: 14px 28px;
+                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                    color: white;
+                    border: none;
+                    border-radius: 12px;
+                    font-size: 15px;
+                    font-weight: 600;
+                    cursor: pointer;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    gap: 8px;
+                    transition: all 0.3s ease;
+                    box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+                `;
+
+                // Create Cancel button
+                const cancelButton = document.createElement('button');
+                cancelButton.textContent = 'Cancel';
+                cancelButton.style.cssText = `
+                    padding: 14px 28px;
+                    background: rgba(255, 255, 255, 0.1);
+                    color: rgba(255, 255, 255, 0.7);
+                    border: 1px solid rgba(255, 255, 255, 0.2);
+                    border-radius: 12px;
+                    font-size: 15px;
+                    font-weight: 500;
+                    cursor: pointer;
+                    transition: all 0.3s ease;
+                `;
+
+                // Hover effects
+                activateButton.addEventListener('mouseenter', () => {
+                    activateButton.style.transform = 'translateY(-2px)';
+                    activateButton.style.boxShadow = '0 6px 20px rgba(102, 126, 234, 0.6)';
+                });
+                activateButton.addEventListener('mouseleave', () => {
+                    activateButton.style.transform = 'translateY(0)';
+                    activateButton.style.boxShadow = '0 4px 15px rgba(102, 126, 234, 0.4)';
+                });
+
+                cancelButton.addEventListener('mouseenter', () => {
+                    cancelButton.style.background = 'rgba(255, 255, 255, 0.15)';
+                    cancelButton.style.color = 'white';
+                });
+                cancelButton.addEventListener('mouseleave', () => {
+                    cancelButton.style.background = 'rgba(255, 255, 255, 0.1)';
+                    cancelButton.style.color = 'rgba(255, 255, 255, 0.7)';
+                });
+
+                // Click handlers
+                activateButton.addEventListener('click', async () => {
+                    console.log('✅ Activate button clicked - requesting confirmation');
+                    
+                    // Show confirmation dialog
+                    const confirmActivation = confirm(
+                        '⚠️ FINAL CONFIRMATION\n\n' +
+                        'You are about to activate this trading strategy.\n\n' +
+                        '⚠️ This will start trading with real funds.\n' +
+                        '⚠️ Trades will be executed automatically based on your strategy.\n\n' +
+                        'Are you absolutely sure you want to proceed?'
+                    );
+                    
+                    if (!confirmActivation) {
+                        console.log('❌ User cancelled activation');
+                        addMessage('system', '❌ Strategy activation cancelled');
+                        return;
+                    }
+                    
+                    // User confirmed - proceed with activation
+                    activateButton.disabled = true;
+                    activateButton.innerHTML = '<span>Activating...</span>';
+
+                    // Execute strategy
+                    try {
+                        const currentMode = window.getPaperTradingMode ? window.getPaperTradingMode() : 'paper';
+                        const paperSessionId = window.getCurrentPaperSessionId ? window.getCurrentPaperSessionId() : null;
+
+                        const executeResponse = await fetch('http://localhost:3000/api/agent/execute', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                sessionId,
+                                walletAddress,
+                                paperTradingMode: currentMode,
+                                paperTradingSessionId: paperSessionId
+                            })
+                        });
+
+                        const executeData = await executeResponse.json();
+
+                        if (executeData.success && executeData.data.strategyId) {
+                            const strategyId = executeData.data.strategyId;
+                            console.log('✅ Strategy activated successfully:', strategyId);
+
+                            // Store strategy ID globally
+                            currentStrategyId = strategyId;
+
+                            // Subscribe to WebSocket updates
+                            if (socket.connected) {
+                                socket.emit('performance:subscribe', { strategyId });
+                            }
+
+                            // Update UI
+                            const strategyName = getStrategyDisplayName(strategy);
+                            updateStrategyStatus('active', strategyName, 0);
+                            showActiveStrategyInPanel(strategy, strategyId);
+
+                            // Remove button
+                            buttonContainer.remove();
+
+                            // Show success
+                            showNotification('✅ Strategy activated and executing!', 'success');
+                            addMessage('system', `✅ ${executeData.data.message}`);
+                        } else {
+                            throw new Error(executeData.error || 'Failed to activate');
+                        }
+                    } catch (error) {
+                        console.error('❌ Activation failed:', error);
+                        showNotification('❌ Failed to activate strategy', 'error');
+                        activateButton.disabled = false;
+                        activateButton.innerHTML = `
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M5 12h14M12 5l7 7-7 7"/>
+                            </svg>
+                            <span>Activate Strategy</span>
+                        `;
+                    }
+                });
+
+                cancelButton.addEventListener('click', () => {
+                    console.log('❌ Cancel button clicked');
+                    buttonContainer.remove();
+                    addMessage('system', '❌ Strategy activation cancelled');
+                });
+
+                // Add buttons to container
+                buttonContainer.appendChild(activateButton);
+                buttonContainer.appendChild(cancelButton);
+
+                // Add to chat messages
+                const chatMessages = document.getElementById('chatMessages');
+                if (chatMessages) {
+                    chatMessages.appendChild(buttonContainer);
+                    chatMessages.scrollTop = chatMessages.scrollHeight;
+                }
+
+                // Add pulse animation
+                const style = document.createElement('style');
+                style.textContent = `
+                    @keyframes pulse-border {
+                        0%, 100% { border-color: rgba(102, 126, 234, 0.3); box-shadow: 0 0 0 0 rgba(102, 126, 234, 0.4); }
+                        50% { border-color: rgba(102, 126, 234, 0.6); box-shadow: 0 0 0 8px rgba(102, 126, 234, 0); }
+                    }
+                `;
+                if (!document.querySelector('style[data-activate-button]')) {
+                    style.setAttribute('data-activate-button', '');
+                    document.head.appendChild(style);
+                }
+            }
+
+            // Show Active Strategy in Right Panel (enhanced version)
+            function showActiveStrategyInPanel(strategy, strategyId) {
+                console.log('📊 Showing strategy in right panel:', strategy);
+
+                // Hide no-strategy state
+                const noStrategyState = document.getElementById('noStrategyState');
+                if (noStrategyState) noStrategyState.style.display = 'none';
+
+                // Show active strategy view
+                const activeView = document.getElementById('activeStrategyView');
+                if (activeView) {
+                    activeView.style.display = 'block';
+
+                    // Update strategy name
+                    const strategyNameEl = document.getElementById('strategyName');
+                    if (strategyNameEl) {
+                        const displayName = getStrategyDisplayName(strategy);
+                        strategyNameEl.textContent = displayName;
+                    }
+
+                    // Update strategy description
+                    const strategyDescEl = document.getElementById('strategyDescription');
+                    if (strategyDescEl) {
+                        let description = strategy.description || '';
+
+                        // If no description, create one from config
+                        if (!description && strategy.config) {
+                            const config = strategy.config;
+                            const isSell = config.side === 'sell' || config.sellAmountSOL !== undefined;
+
+                            if (isSell) {
+                                description = `Selling ${config.sellAmountSOL || 0} SOL over ${config.sellCount || 1} executions, ${config.intervalMinutes || 5} minutes apart`;
+                            } else {
+                                description = `Buying ${config.buyAmountSOL || 0} SOL over ${config.buyCount || 1} executions, ${config.intervalMinutes || 5} minutes apart`;
+                            }
+                        }
+                        strategyDescEl.textContent = description;
+                    }
+
+                    // Update status badge in right panel
+                    const rightPanelBadge = activeView.querySelector('.status-badge');
+                    if (rightPanelBadge) {
+                        rightPanelBadge.className = 'status-badge active';
+                        rightPanelBadge.textContent = 'ACTIVE';
+                    }
+
+                    // Initialize metrics to zero
+                    updateLiveMetrics({
+                        executions: 0,
+                        pnl: 0,
+                        roi: 0,
+                        winRate: 0
+                    });
+
+                    // Clear and prepare trade feed
+                    const tradeFeedList = document.getElementById('tradeFeedList');
+                    if (tradeFeedList) {
+                        tradeFeedList.innerHTML = '<div class="trade-feed-empty" style="text-align: center; padding: 20px; color: rgba(255,255,255,0.5); font-size: 13px;">Waiting for trades...</div>';
+                    }
+                }
+
+                // Automatically open the panel when strategy is activated
+                const panel = document.getElementById('strategyPanel');
+                const resizeHandle = document.getElementById('resizeHandle');
+                if (panel) {
+                    // Remove collapsed class to show the panel
+                    panel.classList.remove('collapsed');
+                    isPanelCollapsed = false;
+
+                    // Show resize handle
+                    if (resizeHandle) resizeHandle.style.display = 'block';
+
+                    // Update button rotation
+                    const btn = document.querySelector('.toggle-panel-btn svg');
+                    if (btn) btn.style.transform = 'rotate(0deg)';
+                }
+
+                // Ensure panel is visible on mobile
+                if (window.innerWidth <= 1024) {
+                    if (panel) panel.classList.add('open');
+                }
+            }
+
+            // Show Active Strategy (legacy compatibility)
+            function showActiveStrategy(strategy) {
+                showActiveStrategyInPanel(strategy, null);
+            }
+
+            // Update Live Metrics with Enhanced Display (NO CONSOLE LOGS)
+            function updateLiveMetrics(metrics) {
+                console.log('🔍 [updateLiveMetrics] RAW metrics received:', {
+                    fullMetricsObject: metrics,
+                    metricsNested: metrics?.metrics,
+                    winRate: metrics?.winRate,
+                    winRateFromMetrics: metrics?.metrics?.winRate,
+                    profitFactor: metrics?.profitFactor,
+                    profitFactorFromMetrics: metrics?.metrics?.profitFactor,
+                    sharpeRatio: metrics?.sharpeRatio,
+                    winningTrades: metrics?.winningTrades,
+                    winningTradesFromMetrics: metrics?.metrics?.winningTrades,
+                    losingTrades: metrics?.losingTrades,
+                    totalTrades: metrics?.totalTrades,
+                    allKeysTopLevel: Object.keys(metrics || {}),
+                    allKeysNested: metrics?.metrics ? Object.keys(metrics.metrics) : []
+                });
+
+                // Handle different metric formats with proper defaults
+                const executions = metrics?.executions ?? metrics?.totalTrades ?? 0;
+                const pnl = metrics?.pnl ?? metrics?.totalPnLUSD ?? metrics?.totalProfitUSD ?? 0;
+                const pnlValue = Number(pnl) || 0;
+                const roi = metrics?.roi ?? metrics?.totalPnLPercentage ?? 0;
+                const roiValue = Number(roi) || 0;
+                const winRate = metrics?.winRate ?? 0;
+                const winRateValue = Number(winRate) || 0;
+
+                // Enhanced metrics
+                const profitFactor = metrics?.profitFactor ?? 0;
+                const sharpeRatio = metrics?.sharpeRatio ?? 0;
+                const maxDrawdown = metrics?.maxDrawdown ?? 0;
+                const realizedPnL = metrics?.realizedProfitUSD ?? metrics?.realizedPnL ?? 0;
+                const unrealizedPnL = metrics?.unrealizedProfitUSD ?? metrics?.unrealizedPnL ?? 0;
+                const feesUSD = metrics?.totalFeesUSD ?? 0;
+                const executionsPerMin = metrics?.executionsPerMinute ?? 0;
+
+                console.log('📊 [updateLiveMetrics] Processed values:', {
+                    winRateValue,
+                    profitFactor,
+                    sharpeRatio,
+                    maxDrawdown,
+                    executionsPerMin
+                });
+
+                // Update execution count with rate info
+                const execCountEl = document.getElementById('executionCount');
+                if (execCountEl) {
+                    let execText = executions.toString();
+                    if (executionsPerMin > 0) {
+                        execText += ` (${executionsPerMin.toFixed(2)}/min)`;
+                    }
+                    execCountEl.textContent = execText;
+                    
+                    // Add tooltip with timing details
+                    execCountEl.title = `${executions} trades executed`;
+                    if (executionsPerMin > 0) {
+                        execCountEl.title += `\nRate: ${executionsPerMin.toFixed(2)} trades/min`;
+                    }
+                }
+
+                // Update P&L with breakdown
+                const pnlElement = document.getElementById('totalPnL');
+                if (pnlElement) {
+                    pnlElement.textContent = `${pnlValue >= 0 ? '+' : ''}$${pnlValue.toFixed(2)}`;
+                    pnlElement.className = `metric-value ${pnlValue >= 0 ? 'profit' : 'loss'}`;
+                    
+                    // Add detailed tooltip
+                    let tooltip = `Total P&L: $${pnlValue.toFixed(2)}`;
+                    if (realizedPnL !== 0) {
+                        tooltip += `\nRealized: $${realizedPnL.toFixed(2)}`;
+                    }
+                    if (unrealizedPnL !== 0) {
+                        tooltip += `\nUnrealized: $${unrealizedPnL.toFixed(2)}`;
+                    }
+                    if (feesUSD !== 0) {
+                        tooltip += `\nFees: $${feesUSD.toFixed(2)}`;
+                    }
+                    pnlElement.title = tooltip;
+                }
+
+                // Update ROI with projections
+                const roiEl = document.getElementById('roi');
+                if (roiEl) {
+                    roiEl.textContent = `${roiValue >= 0 ? '+' : ''}${roiValue.toFixed(2)}%`;
+                    roiEl.className = `metric-value ${roiValue >= 0 ? 'profit' : 'loss'}`;
+                    
+                    // Add projection tooltip
+                    let tooltip = `Current ROI: ${roiValue.toFixed(2)}%`;
+                    if (metrics?.projectedMonthlyROI) {
+                        tooltip += `\nProjected Monthly: ${metrics.projectedMonthlyROI.toFixed(2)}%`;
+                    }
+                    if (metrics?.projectedYearlyROI) {
+                        tooltip += `\nProjected Yearly: ${metrics.projectedYearlyROI.toFixed(2)}%`;
+                    }
+                    if (maxDrawdown < 0) {
+                        tooltip += `\nMax Drawdown: ${maxDrawdown.toFixed(2)}%`;
+                    }
+                    roiEl.title = tooltip;
+                }
+
+                // Update Win Rate with advanced stats
+                const winRateEl = document.getElementById('winRate');
+                if (winRateEl) {
+                    winRateEl.textContent = `${winRateValue.toFixed(1)}%`;
+                    
+                    // Add detailed tooltip
+                    let tooltip = `Win Rate: ${winRateValue.toFixed(1)}%`;
+                    if (metrics?.winningTrades || metrics?.losingTrades) {
+                        tooltip += `\nWins: ${metrics.winningTrades || 0} | Losses: ${metrics.losingTrades || 0}`;
+                    }
+                    if (profitFactor > 0) {
+                        tooltip += `\nProfit Factor: ${profitFactor.toFixed(2)}`;
+                    }
+                    if (sharpeRatio > 0) {
+                        tooltip += `\nSharpe Ratio: ${sharpeRatio.toFixed(2)}`;
+                    }
+                    if (metrics?.averageWin > 0) {
+                        tooltip += `\nAvg Win: $${metrics.averageWin.toFixed(2)}`;
+                    }
+                    if (metrics?.averageLoss < 0) {
+                        tooltip += `\nAvg Loss: $${Math.abs(metrics.averageLoss).toFixed(2)}`;
+                    }
+                    winRateEl.title = tooltip;
+                }
+
+                // Update Advanced Metrics Panel
+                updateAdvancedMetrics({
+                    profitFactor,
+                    sharpeRatio,
+                    maxDrawdown,
+                    averageWin: metrics?.averageWin || 0,
+                    averageLoss: metrics?.averageLoss || 0,
+                    executionsPerMin,
+                    winningTrades: metrics?.winningTrades || 0,
+                    losingTrades: metrics?.losingTrades || 0,
+                    totalFeesUSD: feesUSD
+                });
+            }
+
+            // Update Advanced Metrics Panel Display
+            function updateAdvancedMetrics(data) {
+                console.log('🎯 updateAdvancedMetrics called with data:', {
+                    data,
+                    profitFactor: data?.profitFactor,
+                    sharpeRatio: data?.sharpeRatio,
+                    maxDrawdown: data?.maxDrawdown,
+                    averageWin: data?.averageWin,
+                    averageLoss: data?.averageLoss,
+                    executionsPerMin: data?.executionsPerMin,
+                    winningTrades: data?.winningTrades,
+                    losingTrades: data?.losingTrades
+                });
+                
+                const panel = document.getElementById('advancedMetricsPanel');
+                
+                // ✅ FIX: Show panel immediately when strategy is active, not just when hasExecutions > 0
+                const activeView = document.getElementById('activeStrategyView');
+                const isStrategyActive = activeView && activeView.style.display !== 'none';
+                
+                // Show panel if strategy is active (even with 0 executions) OR if we have any data
+                if (panel && data && isStrategyActive) {
+                    panel.style.display = 'block';
+                    // Add smooth fade-in animation
+                    panel.style.opacity = '1';
+                    panel.style.transform = 'translateY(0)';
+                } else if (panel) {
+                    // Smooth fade-out animation before hiding
+                    panel.style.opacity = '0';
+                    panel.style.transform = 'translateY(-5px)';
+                    setTimeout(() => {
+                        if (panel.style.opacity === '0') {
+                            panel.style.display = 'none';
+                        }
+                    }, 300); // Match CSS transition duration
+                    return;
+                }
+
+                // Profit Factor
+                const pfEl = document.getElementById('advProfitFactor');
+                if (pfEl) {
+                    if (data.profitFactor > 0) {
+                        pfEl.textContent = data.profitFactor.toFixed(2);
+                        pfEl.className = `advanced-metric-value ${data.profitFactor >= 1 ? 'positive' : 'negative'}`;
+                    } else {
+                        pfEl.textContent = '0.00';
+                        pfEl.className = 'advanced-metric-value';
+                    }
+                }
+
+                // Sharpe Ratio
+                const srEl = document.getElementById('advSharpeRatio');
+                if (srEl) {
+                    srEl.textContent = data.sharpeRatio.toFixed(2);
+                    srEl.className = `advanced-metric-value ${data.sharpeRatio > 0 ? 'positive' : data.sharpeRatio < 0 ? 'negative' : ''}`;
+                }
+
+                // Max Drawdown
+                const mdEl = document.getElementById('advMaxDrawdown');
+                if (mdEl) {
+                    mdEl.textContent = `${data.maxDrawdown.toFixed(2)}%`;
+                    mdEl.className = `advanced-metric-value ${data.maxDrawdown < 0 ? 'negative' : ''}`;
+                }
+
+                // Average Win
+                const awEl = document.getElementById('advAvgWin');
+                if (awEl) {
+                    if (data.averageWin > 0) {
+                        awEl.textContent = `$${data.averageWin.toFixed(2)}`;
+                        awEl.className = 'advanced-metric-value positive';
+                    } else {
+                        awEl.textContent = '$0.00';
+                        awEl.className = 'advanced-metric-value';
+                    }
+                }
+
+                // Average Loss
+                const alEl = document.getElementById('advAvgLoss');
+                if (alEl) {
+                    if (data.averageLoss < 0) {
+                        alEl.textContent = `$${Math.abs(data.averageLoss).toFixed(2)}`;
+                        alEl.className = 'advanced-metric-value negative';
+                    } else {
+                        alEl.textContent = '$0.00';
+                        alEl.className = 'advanced-metric-value';
+                    }
+                }
+
+                // Execution Rate
+                const erEl = document.getElementById('advExecRate');
+                if (erEl) {
+                    if (data.executionsPerMin > 0) {
+                        erEl.textContent = `${data.executionsPerMin.toFixed(2)}/min`;
+                        erEl.className = 'advanced-metric-value neutral';
+                    } else {
+                        erEl.textContent = '0.00/min';
+                        erEl.className = 'advanced-metric-value';
+                    }
+                }
+
+                // Win/Loss Ratio
+                const wlrEl = document.getElementById('advWinLossRatio');
+                if (wlrEl) {
+                    const wins = data.winningTrades || 0;
+                    const losses = data.losingTrades || 0;
+                    wlrEl.textContent = `${wins}:${losses}`;
+                    
+                    if (wins > losses) {
+                        wlrEl.className = 'advanced-metric-value positive';
+                    } else if (losses > wins) {
+                        wlrEl.className = 'advanced-metric-value negative';
+                    } else {
+                        wlrEl.className = 'advanced-metric-value';
+                    }
+                }
+
+                // Total Fees
+                const tfEl = document.getElementById('advTotalFees');
+                if (tfEl) {
+                    tfEl.textContent = `$${(data.totalFeesUSD || 0).toFixed(2)}`;
+                    tfEl.className = 'advanced-metric-value neutral';
+                }
+            }
+
+            // Pause Strategy (redirect to existing function)
+            function pauseStrategyPanel() {
+                pauseStrategy();
+            }
+
+            // Stop Strategy (redirect to existing function)  
+            function stopStrategyPanel() {
+                stopStrategy();
+            }
+
+            // Resize Handle Functionality
+            (function initResizeHandle() {
+                const resizeHandle = document.getElementById('resizeHandle');
+                const chatPanel = document.getElementById('chatPanel');
+                const strategyPanel = document.getElementById('strategyPanel');
+
+                if (!resizeHandle || !chatPanel || !strategyPanel) {
+                    console.warn('Resize handle or panels not found');
+                    return;
+                }
+
+                let isResizing = false;
+
+                resizeHandle.addEventListener('mousedown', (e) => {
+                    isResizing = true;
+                    document.body.style.cursor = 'col-resize';
+                    document.body.style.userSelect = 'none';
+                    e.preventDefault();
+                });
+
+                document.addEventListener('mousemove', (e) => {
+                    if (!isResizing) return;
+
+                    const container = document.querySelector('.split-container');
+                    if (!container) return;
+
+                    const containerRect = container.getBoundingClientRect();
+                    const newChatWidth = e.clientX - containerRect.left;
+                    const chatPercent = (newChatWidth / containerRect.width) * 100;
+
+                    // Constrain between 30% and 70%
+                    if (chatPercent >= 30 && chatPercent <= 70) {
+                        chatPanel.style.flex = `0 0 ${chatPercent}%`;
+                        strategyPanel.style.flex = `0 0 ${100 - chatPercent}%`;
+                    }
+                });
+
+                document.addEventListener('mouseup', () => {
+                    if (isResizing) {
+                        isResizing = false;
+                        document.body.style.cursor = '';
+                        document.body.style.userSelect = '';
+                    }
+                });
+
+                // Mobile: Close panel when clicking outside
+                document.addEventListener('click', (e) => {
+                    if (window.innerWidth <= 1024) {
+                        const panel = document.getElementById('strategyPanel');
+                        const mobileBtn = document.getElementById('mobileStrategyBtn');
+                        const toggleBtn = document.querySelector('.toggle-panel-btn');
+
+                        if (panel.classList.contains('open') &&
+                            !panel.contains(e.target) &&
+                            e.target !== mobileBtn &&
+                            e.target !== toggleBtn &&
+                            !toggleBtn?.contains(e.target)) {
+                            panel.classList.remove('open');
+                        }
+                    }
+                });
+            })();
+
+        </script>
+</body>
+
+</html>

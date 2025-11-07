@@ -1,9 +1,15 @@
-FROM node:20-alpine
+# Multi-stage Docker build for MPC-enabled trading server
+
+# Build stage
+FROM node:18-alpine AS builder
+
+# Install build dependencies
+RUN apk add --no-cache python3 make g++
 
 # Set working directory
 WORKDIR /app
 
-# Copy package files first for better layer caching
+# Copy package files
 COPY package*.json ./
 
 # Install dependencies
@@ -15,22 +21,45 @@ COPY . .
 # Build TypeScript
 RUN npm run build
 
-# Create non-root user for security
-RUN addgroup -g 1001 -S nodejs
-RUN adduser -S strategy-runner -u 1001
+# Production stage
+FROM node:18-alpine AS production
 
-# Change ownership of the app directory
-RUN chown -R strategy-runner:nodejs /app
+# Install production dependencies
+RUN apk add --no-cache dumb-init
+
+# Create non-root user
+RUN addgroup -g 1001 -S nodejs
+RUN adduser -S trader -u 1001
+
+# Set working directory
+WORKDIR /app
+
+# Copy built application from builder stage
+COPY --from=builder --chown=trader:nodejs /app/dist ./dist
+COPY --from=builder --chown=trader:nodejs /app/package*.json ./
+COPY --from=builder --chown=trader:nodejs /app/start-server.js ./
+
+# Create directories for MPC credentials and logs
+RUN mkdir -p /app/mpc-credentials /app/logs && \
+    chown -R trader:nodejs /app/mpc-credentials /app/logs
+
+# Install production dependencies only
+RUN npm ci --only=production && npm cache clean --force
 
 # Switch to non-root user
-USER strategy-runner
+USER trader
 
-# Expose port
-EXPOSE 3000 3001
+# Environment variables (can be overridden at runtime)
+ENV NODE_ENV=production
+ENV MPC_ENABLED=false
+ENV MPC_PROVIDER=mock
 
 # Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-  CMD wget --no-verbose --tries=1 --spider http://localhost:3001/health || exit 1
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+  CMD node -e "const http=require('http');const req=http.request({hostname:'localhost',port:process.env.PORT||3000,path:'/health'},res=>{process.exit(res.statusCode===200?0:1)});req.on('error',()=>process.exit(1));req.end();"
+
+# Use dumb-init for proper signal handling
+ENTRYPOINT ["/usr/bin/dumb-init", "--"]
 
 # Start the application
-CMD ["npm", "start"] 
+CMD ["node", "start-server.js"]

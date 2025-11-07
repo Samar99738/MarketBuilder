@@ -42,12 +42,12 @@ export async function calculateOptimalPriorityFee(
     // Use the higher of network-based fee or configured minimum
     const optimalFee = Math.max(baseFee, configFee);
     
-    console.log(`Priority fee (${urgency}): ${optimalFee} lamports (network: ${baseFee}, config: ${configFee})`);
+  // Priority fee calculation for logging removed for production
     
     return optimalFee;
     
   } catch (error) {
-    console.warn('Failed to calculate dynamic priority fee:', (error as Error).message);
+  // Failed to calculate dynamic priority fee
     return TRADING_CONFIG.PRIORITY_FEE_CONFIG[urgency.toUpperCase() as keyof typeof TRADING_CONFIG.PRIORITY_FEE_CONFIG] as number;
   }
 }
@@ -108,7 +108,7 @@ export async function detectNetworkCongestion(connection: Connection): Promise<{
       recommendation = 'Extreme network congestion. Consider delaying non-urgent trades or using maximum fees.';
     }
 
-    console.log(`Network status: ${congestionLevel} (${avgTxRate.toFixed(0)} tx/s, ${(avgSlotTime * 1000).toFixed(0)}ms slots)`);
+  // Network status logging removed for production
     
     return {
       congestionLevel,
@@ -118,7 +118,7 @@ export async function detectNetworkCongestion(connection: Connection): Promise<{
     };
     
   } catch (error) {
-    console.warn('Failed to detect network congestion:', (error as Error).message);
+  // Failed to detect network congestion
     return {
       congestionLevel: 'medium',
       suggestedPriorityFee: TRADING_CONFIG.PRIORITY_FEE_CONFIG.MEDIUM,

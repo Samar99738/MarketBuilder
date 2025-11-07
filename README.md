@@ -1,3 +1,92 @@
+# Strategy Templates
+
+The `StrategyBuilder` class provides static methods to generate reusable trading strategy templates:
+
+## DCA (Dollar Cost Averaging) Strategy
+
+```
+StrategyBuilder.generateDCAStrategyTemplate(
+  id: string,
+  name: string,
+  description: string,
+  buyIntervalsMs: number[],
+  buyAmountsSol: number[],
+  riskLimits?: Partial<RiskLimits>
+): Strategy
+```
+
+**Example:**
+```ts
+const dcaStrategy = StrategyBuilder.generateDCAStrategyTemplate(
+  'dca1',
+  'DCA Example',
+  'Buy at regular intervals',
+  [60000, 120000, 180000],
+  [0.1, 0.2, 0.3]
+);
+```
+
+---
+
+## Grid Trading Strategy
+
+```
+StrategyBuilder.generateGridStrategyTemplate(
+  id: string,
+  name: string,
+  description: string,
+  gridLevels: number,
+  lowerPrice: number,
+  upperPrice: number,
+  amountPerLevel: number,
+  riskLimits?: Partial<RiskLimits>
+): Strategy
+```
+
+**Example:**
+```ts
+const gridStrategy = StrategyBuilder.generateGridStrategyTemplate(
+  'grid1',
+  'Grid Example',
+  'Buy/sell at grid levels',
+  5,
+  10,
+  20,
+  0.5
+);
+```
+
+---
+
+## Stop-Loss Strategy
+
+```
+StrategyBuilder.generateStopLossStrategyTemplate(
+  id: string,
+  name: string,
+  description: string,
+  entryPrice: number,
+  stopLossPrice: number,
+  amountInSol: number,
+  riskLimits?: Partial<RiskLimits>
+): Strategy
+```
+
+**Example:**
+```ts
+const stopLossStrategy = StrategyBuilder.generateStopLossStrategyTemplate(
+  'sl1',
+  'Stop-Loss Example',
+  'Buy and sell at stop-loss',
+  100,
+  90,
+  1
+);
+```
+
+---
+
+See the `StrategyBuilder.ts` source and tests for more details and advanced usage.
 # Strategy Builder MCP Server
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
