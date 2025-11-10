@@ -155,10 +155,18 @@ export class PumpFunWebSocketListener extends EventEmitter {
   private processTradeEvent(event: Event): void {
     try {
       const data = event.data as any;
-      const mintAddress = data.mint.toString().toLowerCase();
+      
+      // CRITICAL: Ensure mint is properly converted to string
+      // PublicKey.toString() returns base58 string
+      const mintStr = typeof data.mint === 'string' ? data.mint : data.mint.toString();
+      const mintAddress = mintStr.toLowerCase();
 
       console.log(`🔍 [PumpFunWebSocket] Trade detected for token: ${mintAddress.substring(0, 8)}...`);
+      console.log(`🔍 [PumpFunWebSocket] data.mint type: ${typeof data.mint}, value: ${mintStr}`);
+      console.log(`🔍 [PumpFunWebSocket] Full address (lowercase): ${mintAddress}`);
       console.log(`🔍 [PumpFunWebSocket] Monitoring ${this.monitoredTokens.size} token(s): ${Array.from(this.monitoredTokens).map(t => t.substring(0, 8)).join(', ')}`);
+      console.log(`🔍 [PumpFunWebSocket] Full monitored addresses: ${Array.from(this.monitoredTokens).join(', ')}`);
+      console.log(`🔍 [PumpFunWebSocket] Has token in set? ${this.monitoredTokens.has(mintAddress)}`);
 
       // Check if this token is being monitored
       if (!this.monitoredTokens.has(mintAddress)) {

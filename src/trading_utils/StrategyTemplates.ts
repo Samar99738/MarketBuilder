@@ -1532,7 +1532,7 @@ export function createReactiveMirrorStrategy(config: {
   const isSellStrategy = config.side === 'sell';
   const actionName = isSellStrategy ? 'SELL' : 'BUY';
   
-  // 🔥 CRITICAL FIX: Determine what blockchain activity we're WATCHING FOR (not what action we take)
+  // Determine what blockchain activity we're WATCHING FOR (not what action we take)
   // Example: "mirror_buy_activity" means we WATCH FOR buys, then execute sells
   // Example: "mirror_sell_activity" means we WATCH FOR sells, then execute buys
   const triggerAction = config.trigger.includes('buy') ? 'buy' : 'sell';
@@ -1574,7 +1574,7 @@ export function createReactiveMirrorStrategy(config: {
         context.variables.executionCount = 0;
         context.variables.simulatedAmount = 0.001; // Start with small test amount
         
-        // 🔥 FLAG: Request subscription to start IMMEDIATELY
+        // FLAG: Request subscription to start IMMEDIATELY
         context.variables._needsSubscription = true;
         
         return true;
@@ -1601,9 +1601,9 @@ export function createReactiveMirrorStrategy(config: {
     {
       id: 'wait_delay',
       type: 'wait',
-      durationMs: 10000, // Check every 10 seconds in simulation
+      durationMs: 100, // Check every 0.1 seconds in simulation
       onSuccess: 'detect_activity',
-      description: 'Wait 10s before next trigger check'
+      description: 'Wait 0.1s before next trigger check'
     },
     {
       id: 'detect_activity',
@@ -1616,7 +1616,7 @@ export function createReactiveMirrorStrategy(config: {
           return false;
         }
         
-        // ✅ REAL BLOCKCHAIN MONITORING
+        // REAL BLOCKCHAIN MONITORING
         // Check if we received a real trade event from RealTradeFeedService
         if (context.variables.realTradeDetected === true) {
           const tradeType = context.variables.realTradeType; // 'buy' or 'sell'
@@ -1631,12 +1631,15 @@ export function createReactiveMirrorStrategy(config: {
           console.log(`🔔 ================================================\n`);
           
           // Check if this trade matches our trigger
+          console.log(`🎯 [TRIGGER CHECK] Detected trade type: "${tradeType}", Looking for: "${triggerAction}"`);
+          console.log(`🎯 [TRIGGER CHECK] Strategy side: "${config.side}", Sizing: "${config.sizingRule}"`);
           const shouldTrigger = (triggerAction === tradeType);
+          console.log(`🎯 [TRIGGER CHECK] Match result: ${shouldTrigger ? '✅ MATCHED' : '❌ NO MATCH'}`);
           
           if (shouldTrigger) {
             console.log(`✅ TRIGGER MATCHED! Executing ${config.side} order\n`);
             
-            // 🔥 CRITICAL: Set detectedVolume based on what strategy needs
+            // CRITICAL: Set detectedVolume based on what strategy needs
             // - SELL strategies (watching buys) need volume in SOL (how much SOL was spent buying)
             // - BUY strategies (watching sells) need volume in TOKENS (how many tokens were sold)
             if (isSellStrategy) {
@@ -1670,13 +1673,17 @@ export function createReactiveMirrorStrategy(config: {
             context.variables.triggerSignature = tradeSignature;
             
             // Reset the flag so we don't re-trigger
-            context.variables.realTradeDetected = false;
+          //  context.variables.realTradeDetected = false;
             
             return true; // Trigger action
           }
           
-          // Reset flag for next detection
-          context.variables.realTradeDetected = false;
+          //  Don't blindly reset flag
+          // Only reset if we're certain no new trade arrived (wrong type)
+          if (!shouldTrigger) {
+            context.variables.realTradeDetected = false;
+            console.log(`ℹ️ [RESET] Trade type mismatch, resetting flag for next detection`);
+          }
         }
         
         return false; // No trigger yet, keep waiting
@@ -1901,10 +1908,14 @@ export function createReactiveMirrorStrategy(config: {
         context.variables.executionCount = (context.variables.executionCount || 0) + 1;
         const lastSellAmount = context.stepResults.execute_mirror_sell?.data?.tokenAmount || 0;
         console.log(`💰 [MIRROR SELL #${context.variables.executionCount}] Sold ${lastSellAmount} tokens (dynamically calculated)`);
+       
+        // Reset the flag AFTER Successful execution
+        context.variables.realTradeDetected = false;
+        console.log(`[FLAG RESET] Trade Processed successfully, ready for next event`);
         return true;
       },
       onSuccess: 'wait_for_trigger',
-      description: 'Log sell execution'
+      description: 'Log sell execution and reset trigger flag'
     });
   } else {
     // BUY STRATEGY: Mirror sell volumes
@@ -2043,10 +2054,14 @@ export function createReactiveMirrorStrategy(config: {
         context.variables.executionCount = (context.variables.executionCount || 0) + 1;
         const lastBuySOL = context.stepResults.execute_mirror_buy?.data?.solAmount || 0;
         console.log(`💰 [MIRROR BUY #${context.variables.executionCount}] Bought with ${lastBuySOL.toFixed(6)} SOL (dynamically calculated)`);
+        
+        // Reset the flag AFTER Successful execution
+        context.variables.realTradeDetected = false;
+        console.log(`[FLAG RESET] Trade Processed successfully, ready for next event`);
         return true;
       },
       onSuccess: 'wait_for_trigger',
-      description: 'Log buy execution'
+      description: 'Log buy execution and reset trigger flag'
     });
   }
 
@@ -2074,7 +2089,13 @@ export function createReactiveMirrorStrategy(config: {
   }
 
   console.log(`✅ [createReactiveMirrorStrategy] Strategy created with ${steps.length} steps`);
-  return strategyBuilder.getStrategy(config.id)!;
+  
+  // CRITICAL FIX: Attach tokenAddress to strategy object so it can be used for WebSocket subscription
+  const builtStrategy = strategyBuilder.getStrategy(config.id)!;
+  (builtStrategy as any).tokenAddress = config.tokenAddress;
+  console.log(`✅ [createReactiveMirrorStrategy] Attached tokenAddress to strategy: ${config.tokenAddress}`);
+  
+  return builtStrategy;
 }
 
 /**

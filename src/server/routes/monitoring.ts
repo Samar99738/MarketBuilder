@@ -8,6 +8,7 @@ import { asyncHandler } from '../middleware/errorHandler';
 import { monitoringService } from '../../utils/monitoring';
 import { getRPCMetrics } from '../../config/rpc-config';
 import { strategyExecutionManager } from '../../trading_utils/StrategyExecutionManager';
+import { realTimeMetrics } from '../../monitoring/RealTimeMetrics';
 
 const router = Router();
 
@@ -168,6 +169,96 @@ router.post('/reset', asyncHandler(async (req: Request, res: Response) => {
     success: true,
     message: 'Monitoring metrics reset successfully',
     timestamp: new Date().toISOString()
+  });
+}));
+
+/**
+ * GET /api/monitoring/dead-letter-queue
+ * Get failed trades from dead letter queue
+ */
+router.get('/dead-letter-queue', asyncHandler(async (req: Request, res: Response) => {
+  const limit = parseInt(req.query.limit as string) || 100;
+  const queue = strategyExecutionManager.getDeadLetterQueue(limit);
+  
+  res.json({
+    success: true,
+    data: {
+      entries: queue,
+      count: queue.length,
+      timestamp: new Date().toISOString()
+    }
+  });
+}));
+
+/**
+ * DELETE /api/monitoring/dead-letter-queue
+ * Clear dead letter queue
+ */
+router.delete('/dead-letter-queue', asyncHandler(async (req: Request, res: Response) => {
+  strategyExecutionManager.clearDeadLetterQueue();
+  
+  res.json({
+    success: true,
+    message: 'Dead letter queue cleared',
+    timestamp: new Date().toISOString()
+  });
+}));
+
+/**
+ * POST /api/monitoring/circuit-breaker/reset/:strategyId
+ * Reset circuit breaker for a strategy (manual intervention)
+ */
+router.post('/circuit-breaker/reset/:strategyId', asyncHandler(async (req: Request, res: Response) => {
+  const { strategyId } = req.params;
+  
+  strategyExecutionManager.resetCircuitBreaker(strategyId);
+  
+  res.json({
+    success: true,
+    message: `Circuit breaker reset for strategy ${strategyId}`,
+    timestamp: new Date().toISOString()
+  });
+}));
+
+/**
+ * GET /api/monitoring/real-time-metrics
+ * Get real-time execution metrics
+ */
+router.get('/real-time-metrics', asyncHandler(async (req: Request, res: Response) => {
+  const report = realTimeMetrics.generateReport();
+  
+  res.json({
+    success: true,
+    data: {
+      strategies: report,
+      timestamp: new Date().toISOString()
+    }
+  });
+}));
+
+/**
+ * GET /api/monitoring/real-time-metrics/:strategyId
+ * Get real-time metrics for specific strategy
+ */
+router.get('/real-time-metrics/:strategyId', asyncHandler(async (req: Request, res: Response) => {
+  const { strategyId } = req.params;
+  const stats = realTimeMetrics.getStats(strategyId);
+  const history = realTimeMetrics.getHistory(strategyId, 100);
+  
+  if (!stats) {
+    return res.status(404).json({
+      success: false,
+      error: 'No metrics found for strategy'
+    });
+  }
+  
+  res.json({
+    success: true,
+    data: {
+      stats,
+      history,
+      timestamp: new Date().toISOString()
+    }
   });
 }));
 

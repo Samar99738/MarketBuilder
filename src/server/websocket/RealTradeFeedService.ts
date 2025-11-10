@@ -67,7 +67,7 @@ export class RealTradeFeedService extends EventEmitter {
     this.rpcUrl = rpcUrl || 'https://api.mainnet-beta.solana.com';
     this.tradeMonitor = new SolanaTradeMonitor(io, rpcUrl);
     
-    // Initialize WebSocket listener (single instance for all tokens)
+    // Initialize PumpFun WebSocket Listener (bonding curve tokens only)
     this.webSocketListener = new PumpFunWebSocketListener(
       this.rpcUrl,
       IDL as Idl
@@ -107,6 +107,7 @@ export class RealTradeFeedService extends EventEmitter {
       // This is how strategies receive real-time trade data!
       this.emit(`trade:${tokenAddress}`, trade);
       console.log(`📡 [RealTradeFeedService] Emitted event: trade:${tokenAddress}`);
+      console.log(`📡 [RealTradeFeedService] Listeners for this token: ${this.listenerCount(`trade:${tokenAddress}`)}`);
 
       // Emit event for strategies to consume
       this.emit('real_trade', trade);
@@ -184,27 +185,30 @@ export class RealTradeFeedService extends EventEmitter {
    * CRITICAL: This connects PumpFunWebSocketListener events to our service
    */
   private setupEventHandlers(): void {
-    // Listen for real trades from WebSocket listener
+    // Listen for real trades from PumpFun WebSocket Listener (bonding curve only)
     if (this.webSocketListener) {
       this.webSocketListener.on('trade', (tradeData: any) => {
-        // Convert WebSocket trade format to RealTradeEvent format
+        // Convert PumpFun trade format to RealTradeEvent format
+        // CRITICAL: Normalize tokenAddress to lowercase for consistent event matching
         const trade: RealTradeEvent = {
-          tokenAddress: tradeData.mint,
+          tokenAddress: tradeData.mint.toLowerCase(),
           type: tradeData.isBuy ? 'buy' : 'sell',
           solAmount: tradeData.solAmount,
           tokenAmount: tradeData.tokenAmount,
           trader: tradeData.user,
-          signature: 'websocket-' + Date.now(), // WebSocket doesn't provide signature
+          signature: 'pumpfun-' + Date.now(),
           timestamp: tradeData.timestamp * 1000, // Convert to milliseconds
           price: tradeData.solAmount / tradeData.tokenAmount,
           isRealTrade: true,
         };
         
+        console.log(`🚀 [RealTradeFeedService] Pump.fun trade detected (bonding curve)`);
+        
         this.handleRealTrade(trade);
       });
       
       console.log('[RealTradeFeedService] ✅ Event handlers connected to PumpFunWebSocketListener');
-      console.log('[RealTradeFeedService] 🔥 Listening for "trade" events from WebSocket');
+      console.log('[RealTradeFeedService] 🔥 Monitoring pump.fun bonding curve tokens');
     }
   }
 
@@ -239,11 +243,14 @@ export class RealTradeFeedService extends EventEmitter {
   async subscribeToToken(tokenAddress: string, socketId: string): Promise<boolean> {
     try {
       console.log(`\n🚀 ========== SUBSCRIBE TO TOKEN ==========`);
-      console.log(`🚀 Token: ${tokenAddress}`);
+      console.log(`🚀 Token (received): ${tokenAddress}`);
+      console.log(`🚀 Token length: ${tokenAddress.length}`);
+      console.log(`🚀 Token is lowercase: ${tokenAddress === tokenAddress.toLowerCase()}`);
       console.log(`🚀 Subscriber: ${socketId}`);
       
       // Use WebSocket for REAL-TIME trade detection
       if (this.webSocketListener) {
+        console.log(`🚀 Passing to WebSocket: ${tokenAddress}`);
         await this.webSocketListener.start(tokenAddress);
         
         // Initialize stats if not exists
@@ -389,13 +396,14 @@ export class RealTradeFeedService extends EventEmitter {
    * Get service statistics
    */
   getStats() {
+    const monitoredTokens = this.webSocketListener?.getMonitoredTokens() || [];
     return {
-      tokensMonitored: this.webSocketListener?.getMonitoredTokens().length || 0,
+      tokensMonitored: monitoredTokens.length,
       tokensWithStats: this.tradeStats.size,
       totalTradesBuffered: Array.from(this.recentTrades.values())
         .reduce((sum, trades) => sum + trades.length, 0),
-      method: 'WebSocket real-time monitoring',
-      isConnected: this.webSocketListener?.isActive() || false,
+      method: 'PumpFun WebSocket monitoring (bonding curve only)',
+      isConnected: monitoredTokens.length > 0,
     };
   }
 
