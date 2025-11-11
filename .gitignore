@@ -25,6 +25,7 @@ pnpm-debug.log*
 coverage/
 .nyc_output/
 tmp_strategies/
+tests/
 
 # IDE files
 .vscode/

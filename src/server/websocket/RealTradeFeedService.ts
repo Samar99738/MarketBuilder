@@ -60,6 +60,12 @@ export class RealTradeFeedService extends EventEmitter {
     sellVolumeLast5Min: number;
     lastCheck: number;
   }> = new Map();
+  
+  // Connection health monitoring
+  private lastTradeTimestamp: number = Date.now();
+  private healthCheckInterval: NodeJS.Timeout | null = null;
+  private readonly CONNECTION_TIMEOUT_MS = 120000; // 2 minutes
+  private connectionStale: boolean = false;
 
   constructor(io: SocketServer, rpcUrl?: string) {
     super();
@@ -75,6 +81,7 @@ export class RealTradeFeedService extends EventEmitter {
     
     this.setupEventHandlers();
     this.setupEventForwarding();
+    this.startHealthMonitoring();
   }
 
   // Event forwarding from monitors to service
@@ -83,10 +90,13 @@ export class RealTradeFeedService extends EventEmitter {
     // The PumpFunTradePoller emits 'pumpfun:real_trade' events via socket.io
   }
 
-  // 🔥 Unified trade handler - THIS IS WHERE REAL TRADES ENTER THE SYSTEM
+  // Unified trade handler - THIS IS WHERE REAL TRADES ENTER THE SYSTEM
   private handleRealTrade(trade: RealTradeEvent): void {
     try {
       const { tokenAddress } = trade;
+      
+      // Update health check timestamp
+      this.updateLastTradeTimestamp();
       
       console.log(`\n🔥 ========== REAL TRADE DETECTED ==========`);
       console.log(`🔥 Token: ${tokenAddress.substring(0, 8)}...`);
@@ -103,7 +113,7 @@ export class RealTradeFeedService extends EventEmitter {
       // Update statistics
       this.updateTradeStats(trade);
 
-      // 🔥 CRITICAL: Emit to token-specific listeners (for strategies)
+      // Emit to token-specific listeners (for strategies)
       // This is how strategies receive real-time trade data!
       this.emit(`trade:${tokenAddress}`, trade);
       console.log(`📡 [RealTradeFeedService] Emitted event: trade:${tokenAddress}`);
@@ -222,10 +232,128 @@ export class RealTradeFeedService extends EventEmitter {
   }
 
   /**
+   * Start monitoring WebSocket connection health
+   * Detects if trades stop coming in (connection may be dead)
+   */
+  private startHealthMonitoring(): void {
+    if (this.healthCheckInterval) {
+      clearInterval(this.healthCheckInterval);
+    }
+    
+    this.healthCheckInterval = setInterval(() => {
+      this.checkConnectionHealth();
+    }, 60000); // Check every minute
+    
+    console.log('[RealTradeFeedService] 💓 Health monitoring started');
+  }
+
+  /**
+   * Check if we're still receiving trades
+   */
+  private checkConnectionHealth(): void {
+    // Only check if we have monitored tokens
+    if (!this.webSocketListener) {
+      return;
+    }
+    
+    const monitoredTokens = this.webSocketListener.getMonitoredTokens();
+    if (monitoredTokens.length === 0) {
+      return;
+    }
+    
+    const timeSinceLastTrade = Date.now() - this.lastTradeTimestamp;
+    const minutesSinceLastTrade = Math.floor(timeSinceLastTrade / 60000);
+    
+    if (timeSinceLastTrade > this.CONNECTION_TIMEOUT_MS) {
+      if (!this.connectionStale) {
+        // First time detecting stale connection
+        console.error(`❌ [Health Check] No trades received in ${minutesSinceLastTrade} minutes`);
+        console.error(`❌ [Health Check] WebSocket connection may be dead`);
+        console.error(`❌ [Health Check] Monitored tokens: ${monitoredTokens.join(', ')}`);
+        
+        this.connectionStale = true;
+        this.emit('connection_stale', {
+          minutesSinceLastTrade,
+          monitoredTokens: monitoredTokens
+        });
+        
+        // Broadcast to UI
+        this.io.emit('websocket:health:warning', {
+          status: 'stale',
+          minutesSinceLastTrade,
+          message: 'No trades detected recently. Connection may be dead.',
+          timestamp: Date.now()
+        });
+        
+        // Attempt reconnection
+        this.attemptReconnection();
+      }
+    } else if (this.connectionStale && timeSinceLastTrade < 60000) {
+      // Connection recovered (received trade in last minute)
+      console.log(`✅ [Health Check] Connection recovered - trades flowing again`);
+      this.connectionStale = false;
+      
+      this.io.emit('websocket:health:recovered', {
+        status: 'healthy',
+        message: 'Real-time trade detection recovered',
+        timestamp: Date.now()
+      });
+    }
+  }
+
+  /**
+   * Attempt to reconnect WebSocket
+   */
+  private async attemptReconnection(): Promise<void> {
+    try {
+      console.log('[RealTradeFeedService] 🔄 Attempting WebSocket reconnection...');
+      
+      if (this.webSocketListener) {
+        // Get current monitored tokens using public method
+        const tokens = this.webSocketListener.getMonitoredTokens();
+        
+        // Stop current connection
+        await this.webSocketListener.stop();
+        
+        // Restart for each token
+        for (const token of tokens) {
+          await this.webSocketListener.start(token);
+        }
+        
+        console.log(`[RealTradeFeedService] ✅ Reconnection complete for ${tokens.length} tokens`);
+      }
+    } catch (error) {
+      console.error('[RealTradeFeedService] ❌ Reconnection failed:', error);
+    }
+  }
+
+  /**
+   * Update last trade timestamp (call from handleRealTrade)
+   */
+  private updateLastTradeTimestamp(): void {
+    this.lastTradeTimestamp = Date.now();
+    
+    if (this.connectionStale) {
+      console.log(`✅ [Health Check] Trade received - connection is alive`);
+    }
+  }
+
+  /**
+   * Stop health monitoring
+   */
+  private stopHealthMonitoring(): void {
+    if (this.healthCheckInterval) {
+      clearInterval(this.healthCheckInterval);
+      this.healthCheckInterval = null;
+    }
+  }
+
+  /**
    * Stop the service
    */
   async stop(): Promise<void> {
     console.log('[RealTradeFeedService] Stopping service...');
+    this.stopHealthMonitoring();
     await this.tradeMonitor.stop();
     
     if (this.webSocketListener) {

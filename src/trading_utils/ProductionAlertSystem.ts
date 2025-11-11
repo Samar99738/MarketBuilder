@@ -47,9 +47,9 @@ export class ProductionAlertSystem extends EventEmitter {
     });
   }
 
-  /**
-   * Send alert
-   */
+  
+   //Send alert
+  
   alert(
     level: Alert['level'],
     title: string,
@@ -87,9 +87,9 @@ export class ProductionAlertSystem extends EventEmitter {
     this.dispatchAlert(alert);
   }
 
-  /**
-   * Convenience methods
-   */
+  
+   // Convenience methods
+   
   info(title: string, message: string, metadata?: any): void {
     this.alert('info', title, message, metadata);
   }
@@ -106,9 +106,8 @@ export class ProductionAlertSystem extends EventEmitter {
     this.alert('emergency', title, message, metadata);
   }
 
-  /**
-   * Dispatch alert through configured channels
-   */
+   // Dispatch alert through configured channels
+   
   private dispatchAlert(alert: Alert): void {
     // Console alerts
     if (this.config.enableConsoleAlerts) {

@@ -192,7 +192,7 @@ export class PumpFunTradePoller extends EventEmitter {
       // Emit new trades
       if (newTrades.length > 0) {
         for (const trade of newTrades) {
-          // 🔥 CRITICAL FIX: Emit internal EventEmitter event for RealTradeFeedService
+          // CRITICAL FIX: Emit internal EventEmitter event for RealTradeFeedService
           this.emit('real_trade', trade);
           
           // Also emit to Socket.IO for UI clients

@@ -881,7 +881,7 @@ export class StrategyExecutionManager {
         error as Error
       );
 
-      // FIX #8: Check stop flag even in error case
+      // Check stop flag even in error case
       if (runningStrategy.currentContext?.variables._shouldStop === true || this.isShuttingDown) {
         console.log(`🛑 [StrategyExecutionManager] Stop flag detected in error handler - NOT retrying`);
         runningStrategy.status = 'stopped';
@@ -924,7 +924,64 @@ export class StrategyExecutionManager {
     }
   }
 
-  // ADD: New method for blockchain event subscription
+  /**
+   * Validate token before starting real-time monitoring
+   * Prevents wasting resources on invalid/inactive tokens
+   */
+  private async validateTokenForStrategy(
+    tokenAddress: string, 
+    strategyId: string
+  ): Promise<{ valid: boolean; reason?: string }> {
+    try {
+      console.log(`🔍 [Token Validation] Checking token: ${tokenAddress.substring(0, 8)}...`);
+      
+      // Basic format validation
+      if (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(tokenAddress)) {
+        return { 
+          valid: false, 
+          reason: 'Invalid Solana address format' 
+        };
+      }
+      
+      // Check recent trading activity (warn if none)
+      if (this.realTradeFeed) {
+        const recentTrades = this.realTradeFeed.getRecentTrades(tokenAddress, 10);
+        
+        if (recentTrades.length === 0) {
+          console.warn(`⚠️ [Token Validation] No recent trades detected for ${tokenAddress.substring(0, 8)}...`);
+          
+          // Notify user but allow execution
+          if (this.io) {
+            this.io.emit('strategy:warning', {
+              strategyId,
+              type: 'low_activity_token',
+              message: 'Warning: No recent trading activity detected. Your strategy may take time to trigger.',
+              tokenAddress,
+              timestamp: Date.now()
+            });
+          }
+        } else {
+          const lastTrade = recentTrades[recentTrades.length - 1];
+          const timeSinceLastTrade = Date.now() - lastTrade.timestamp;
+          const minutesSinceLastTrade = Math.floor(timeSinceLastTrade / 60000);
+          
+          console.log(`✅ [Token Validation] Token is active - last trade ${minutesSinceLastTrade} minutes ago`);
+        }
+      }
+      
+      console.log(`✅ [Token Validation] Token ${tokenAddress.substring(0, 8)}... passed validation`);
+      return { valid: true };
+      
+    } catch (error) {
+      console.error(`❌ [Token Validation] Validation failed for ${tokenAddress.substring(0, 8)}...`, error);
+      return { 
+        valid: false, 
+        reason: error instanceof Error ? error.message : 'Unknown validation error' 
+      };
+    }
+  }
+
+  // New method for blockchain event subscription
   private async subscribeToBlockchainEvents(runningId: string, strategy: any): Promise<void> {
     if (!this.realTradeFeed) {
       console.warn(`[StrategyExecutionManager] RealTradeFeedService not available`);
@@ -935,8 +992,32 @@ export class StrategyExecutionManager {
       console.warn(`[StrategyExecutionManager] No token address in strategy ${strategy.id}`);
       return;
     }
+
+    // Validate token before subscription
+    console.log(`[StrategyExecutionManager] 🔍 Validating token before subscription...`);
+    const validation = await this.validateTokenForStrategy(tokenAddress, strategy.id);
     
-    // CRITICAL: Normalize to lowercase for consistent event matching
+    if (!validation.valid) {
+      const errorMsg = `Cannot start strategy: ${validation.reason}`;
+      console.error(`[StrategyExecutionManager] ❌ ${errorMsg}`);
+      
+      // Stop the strategy
+      await this.stopStrategy(runningId);
+      
+      // Notify user
+      if (this.io) {
+        this.io.emit('strategy:failed', {
+          strategyId: strategy.id,
+          runningId: runningId,
+          error: errorMsg,
+          timestamp: Date.now()
+        });
+      }
+      
+      throw new Error(errorMsg);
+    }
+
+    // Normalize to lowercase for consistent event matching
     const normalizedToken = tokenAddress.toLowerCase();
     
     // Tell RealTradeFeedService to START polling this token!
@@ -1005,6 +1086,22 @@ export class StrategyExecutionManager {
       detectedVolume: execution.currentContext.variables.detectedVolume,
       currentStep: execution.currentContext.currentStepId
     });
+    
+    // Emit status update to UI
+    if (this.io) {
+      this.io.emit('strategy:trade_detected', {
+        strategyId: execution.strategyId,
+        runningId: runningId,
+        trade: {
+          type: tradeEvent.type,
+          solAmount: tradeEvent.solAmount,
+          tokenAmount: tradeEvent.tokenAmount,
+          signature: tradeEvent.signature
+        },
+        status: 'processing',
+        timestamp: Date.now()
+      });
+    }
 
     // If strategy is waiting for a trigger, wake it up
     if (
@@ -1050,7 +1147,7 @@ export class StrategyExecutionManager {
 
   /**
  * Immediate action executor for real-time events
- * FIXED: Now actually executes the strategy immediately
+ * Now actually executes the strategy immediately
  */
 private async executeImmediateAction(
   execution: RunningStrategy,
@@ -1063,14 +1160,14 @@ private async executeImmediateAction(
     return;
   }
   
-  // FIX: Check rate limit BEFORE execution
+  // Check rate limit BEFORE execution
   if (!this.checkRateLimit(execution.strategyId)) {
     console.error(`🚨 [RATE LIMIT] Blocking execution for ${execution.id}`);
     this.addToDeadLetterQueue(execution.strategyId, execution.id, event, 'Rate limit exceeded');
     return;
   }
 
-  // FIX: Check circuit breaker BEFORE execution
+  // Check circuit breaker BEFORE execution
   if (!this.checkCircuitBreaker(execution.strategyId)) {
     console.error(`🚨 [CIRCUIT BREAKER] Blocking execution for ${execution.id}`);
     this.addToDeadLetterQueue(execution.strategyId, execution.id, event, 'Circuit breaker tripped');
@@ -1131,7 +1228,7 @@ private async executeImmediateAction(
       console.log(`🛑 [StrategyExecutionManager] Preserved stop flag after immediate execution`);
     }
     
-    // FIX: Record success/failure for circuit breaker
+    // Record success/failure for circuit breaker
     if (result.success) {
       this.recordSuccess(execution.strategyId);
     } else {
@@ -1198,7 +1295,7 @@ private async executeImmediateAction(
     execution.error = error instanceof Error ? error.message : String(error);
     execution.retryCount = (execution.retryCount || 0) + 1;
     
-    // FIX: Record failure and add to dead letter queue
+    // Record failure and add to dead letter queue
     this.recordFailure(execution.strategyId);
     this.addToDeadLetterQueue(execution.strategyId, execution.id, event, execution.error);
     
@@ -1250,7 +1347,7 @@ private async executeImmediateAction(
   }
 
   /**
-   * FIX: Rate Limiter - Prevents runaway strategies
+   * Rate Limiter - Prevents runaway strategies
    * Returns true if execution is allowed, false if rate limit exceeded
    */
   private checkRateLimit(strategyId: string): boolean {
@@ -1288,7 +1385,7 @@ private async executeImmediateAction(
   }
 
   /**
-   * FIX: Circuit Breaker - Stops repeatedly failing strategies
+   * Circuit Breaker - Stops repeatedly failing strategies
    * Returns true if execution is allowed, false if circuit breaker tripped
    */
   private checkCircuitBreaker(strategyId: string): boolean {
@@ -1333,14 +1430,14 @@ private async executeImmediateAction(
   }
 
   /**
-   * FIX: Record successful execution (resets failure count)
+   * Record successful execution (resets failure count)
    */
   private recordSuccess(strategyId: string): void {
     this.failureCount.set(strategyId, 0);
   }
 
   /**
-   * FIX: Record failed execution (increments failure count)
+   * Record failed execution (increments failure count)
    */
   private recordFailure(strategyId: string): void {
     const currentFailures = this.failureCount.get(strategyId) || 0;
@@ -1350,7 +1447,7 @@ private async executeImmediateAction(
   }
 
   /**
-   * FIX: Dead Letter Queue - Store failed trades for manual review
+   * Dead Letter Queue - Store failed trades for manual review
    */
   private addToDeadLetterQueue(strategyId: string, runningId: string, event: any, error: string): void {
     // Prevent DLQ from growing unbounded

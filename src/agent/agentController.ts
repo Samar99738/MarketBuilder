@@ -2113,7 +2113,6 @@ Transaction ID: \`${data.transaction}\`
 
   /**
    * Build context-aware system prompt
-   * All emoji encoding issues resolved
    * Adds MCP tools status
    */
   private buildSystemPrompt(session: AgentSession, userMessage: string, currentSolPrice?: string | null, isPriceQuery: boolean = false): string {

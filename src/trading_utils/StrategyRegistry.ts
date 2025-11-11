@@ -442,15 +442,15 @@ export class StrategyRegistry {
       }
     });
 
-    // 2. TIME-BASED DCA
+    // 2. TIME-BASED DCA (SUPPORTS BOTH BUY AND SELL!)
     this.register({
       type: 'time_based_dca',
-      displayName: 'Dollar Cost Averaging (DCA)',
-      description: 'Purchase or sell fixed amounts at regular time intervals. Reduces impact of volatility through time-based averaging.',
+      displayName: 'Dollar Cost Averaging (DCA) - BUY & SELL',
+      description: '⚠️ IMPORTANT: DCA supports BOTH buying AND selling! Purchase OR sell fixed amounts at regular time intervals. Reduces impact of volatility through time-based averaging. Use "side" field to specify "buy" or "sell".',
       category: 'timing',
       riskLevel: 'low',
-      version: '1.0.0',
-      aiPromptHint: 'User wants repeated purchases/sales at fixed time intervals.',
+      version: '2.0.0',
+      aiPromptHint: '⚠️ CRITICAL: User wants repeated purchases OR sales at fixed time intervals. DCA FULLY SUPPORTS BOTH BUY AND SELL STRATEGIES! If user says "sell", set side="sell" and use sellAmountSOL. If user says "buy", set side="buy" and use buyAmountSOL.',
       aiDetectionKeywords: [
         'every',
         'repeatedly',
@@ -460,14 +460,24 @@ export class StrategyRegistry {
         'schedule',
         'interval',
         'periodic',
-        'regular purchases'
+        'regular purchases',
+        'regular sales',
+        'sell every',
+        'buy every',
+        'repeat this trade',
+        'repeat this sell',
+        'repeat this buy'
       ],
       exampleInputs: [
-        'Buy 0.1 SOL of this token every 5 minutes for 10 times',
-        'DCA into this token: 0.05 SOL every 30 minutes, repeat 20 times',
+        '✅ SELL EXAMPLE: Sell 55000 tokens every 1 minute, repeat 2 times',
+        '✅ SELL EXAMPLE: DCA sell 10000 tokens every 5 minutes until stopped',
+        '✅ BUY EXAMPLE: Buy 0.1 SOL of this token every 5 minutes for 10 times',
+        '✅ BUY EXAMPLE: DCA into this token: 0.05 SOL every 30 minutes, repeat 20 times',
         'Schedule recurring buy: 0.02 SOL every 2 minutes for the next hour'
       ],
       recommendedFor: [
+        '✅ Gradual selling of large positions',
+        '✅ Taking profits over time',
         'Long-term accumulation',
         'Reducing volatility impact',
         'Disciplined investing',
@@ -484,10 +494,37 @@ export class StrategyRegistry {
           }
         },
         {
+          name: 'side',
+          type: 'string',
+          required: true,
+          description: '⚠️ REQUIRED: Trade direction - "buy" or "sell". If user wants to sell, use "sell". If user wants to buy, use "buy".',
+          validation: {
+            customValidator: (value: any) => value === 'buy' || value === 'sell'
+          }
+        },
+        {
+          name: 'buyAmountSOL',
+          type: 'number',
+          required: false,
+          description: '⚠️ FOR BUY SIDE ONLY: Amount of SOL to spend per trade. Required when side="buy".',
+          validation: {
+            min: 0.001
+          }
+        },
+        {
+          name: 'sellAmountSOL',
+          type: 'number',
+          required: false,
+          description: '⚠️ FOR SELL SIDE ONLY: Amount of SOL worth of tokens to sell per trade. Required when side="sell". This will be converted to token amount automatically.',
+          validation: {
+            min: 0.001
+          }
+        },
+        {
           name: 'amountPerTrade',
           type: 'number',
-          required: true,
-          description: 'Amount of SOL to spend per trade',
+          required: false,
+          description: 'DEPRECATED: Use buyAmountSOL or sellAmountSOL instead',
           validation: {
             min: 0.001
           }
@@ -498,7 +535,7 @@ export class StrategyRegistry {
           required: true,
           description: 'Time interval between trades in minutes',
           validation: {
-            min: 1,
+            min: 0.0167,
             max: 10080
           }
         },
@@ -514,15 +551,22 @@ export class StrategyRegistry {
         }
       ],
       exampleConfig: {
-        id: 'time-based-dca-1730304000',
+        id: 'time-based-dca-sell-example',
         strategyType: 'time_based_dca',
-        description: 'Buy 0.1 SOL every 5 minutes for 10 trades',
-        tokenAddress: 'FfNrWEjpAms4m3hmBc4fjpXgm8MM1MQQtygFrJPYpump',
-        amountPerTrade: 0.1,
-        interval: 5,
-        totalTrades: 10,
+        description: '✅ DCA SELL EXAMPLE: Sell 55000 tokens (worth SOL) every 1 minute for 2 trades',
+        tokenAddress: 'CptxR6Upjin7CaGrZdfRpump',
+        side: 'sell',
+        sellAmountSOL: 0.5,
+        intervalMinutes: 1,
+        sellCount: 2,
         confidence: 1.0,
-        isComplete: true
+        isComplete: true,
+        components: [
+          'Dollar Cost Averaging SELL strategy',
+          'Time-based execution every 1 minute',
+          'Automated sell orders',
+          'Position management'
+        ]
       }
     });
 

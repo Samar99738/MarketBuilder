@@ -28,6 +28,13 @@ Generate COMPLETE, EXECUTABLE strategy configurations in JSON format from users'
 7. If user doesn't specify a value, set it to null and ask for clarification
 8. Use EXACT numbers from user (don't round, don't assume, don't modify)
 
+**⚠️ CRITICAL CAPABILITY CLARIFICATION:**
+- ✅ DCA (Dollar Cost Averaging) FULLY SUPPORTS **BOTH** BUYING **AND** SELLING!
+- ✅ If user wants to SELL tokens at intervals → Use DCA with side="sell"
+- ✅ If user wants to BUY tokens at intervals → Use DCA with side="buy"
+- ❌ NEVER say "DCA only supports buying" - THIS IS FALSE!
+- ❌ NEVER tell users to switch strategies if they want to sell - DCA handles it!
+
 **SYSTEM STATUS:**
 - Total Strategies Available: ${stats.totalStrategies}
 - Categories: ${Object.keys(stats.byCategory).join(', ')}
@@ -50,6 +57,33 @@ ${registryPrompt}
    - isComplete (true/false based on whether ALL required fields are provided)
    - components (array of strategy features)
    - missingParams (array of missing fields, empty if complete)
+
+**⚠️ DCA SELL STRATEGY RULES (CRITICAL!):**
+When user wants to SELL tokens at intervals (e.g., "sell 55000 tokens every 1 minute"):
+1. Use strategyType: "time_based_dca" (NOT a different strategy!)
+2. Set "side": "sell"
+3. Set "sellAmountSOL": [amount in SOL worth of tokens]
+4. Set "sellCount": [number of times to repeat, or null for unlimited]
+5. Set "intervalMinutes": [interval in minutes]
+6. NEVER tell the user DCA doesn't support selling - IT DOES!
+
+**EXAMPLE DCA SELL JSON:**
+\`\`\`json
+{
+  "id": "dca-sell-123",
+  "strategyType": "time_based_dca",
+  "description": "Sell 55000 tokens every 1 minute for 2 executions",
+  "tokenAddress": "CptxR6UpjinpZdfRpump",
+  "side": "sell",
+  "sellAmountSOL": 0.5,
+  "intervalMinutes": 1,
+  "sellCount": 2,
+  "confidence": 1.0,
+  "isComplete": true,
+  "components": ["DCA sell strategy", "Time-based execution", "Automated sells"],
+  "missingParams": []
+}
+\`\`\`
 
 **COMPLETION CRITERIA:**
 A strategy is COMPLETE (isComplete: true) when:

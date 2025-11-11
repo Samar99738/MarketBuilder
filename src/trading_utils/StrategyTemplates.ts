@@ -7,7 +7,9 @@
  * UPDATED: Fixed "repeat once" bug - no more default 10 executions!
  */
 
+import { timeStamp } from 'console';
 import { Strategy, StrategyStep, strategyBuilder } from './StrategyBuilder';
+
 
 export interface StrategyTemplateConfig {
   name: string;
@@ -1683,6 +1685,7 @@ export function createReactiveMirrorStrategy(config: {
           if (!shouldTrigger) {
             context.variables.realTradeDetected = false;
             console.log(`ℹ️ [RESET] Trade type mismatch, resetting flag for next detection`);
+            console.log(`ℹ️ [IGNORED TRADE] ${tradeType.toUpperCase()} trade ignored - looking for ${triggerAction.toUpperCase()} trades`);
           }
         }
         
@@ -1702,32 +1705,40 @@ export function createReactiveMirrorStrategy(config: {
       type: 'condition' as const,
       condition: 'custom' as const,
       customCondition: (context: any) => {
-        // In paper trading, the position is auto-initialized to 100k tokens
-        // In real trading, this would query the wallet/exchange
+        const tokenAddress = context.variables.tokenAddress;
         
-        // Try to get actual balance from paper trading state if available
+        // Priority 1: Check if user explicitly specified token supply
+        if (config.supply && config.supply > 0) {
+          context.variables.tokenBalance = config.supply;
+          console.log(`📊 [GET POSITION] Using user-specified supply: ${config.supply.toLocaleString()} tokens`);
+          return true;
+        }
+        
+        // Priority 2: Try to get actual position from paper trading state
         if (context.paperTradingState?.portfolio?.positions) {
-          const tokenAddress = context.variables.tokenAddress;
           const position = context.paperTradingState.portfolio.positions.find(
             (p: any) => p.tokenAddress === tokenAddress
           );
-          if (position) {
+          if (position && position.amount > 0) {
             context.variables.tokenBalance = position.amount;
             console.log(`📊 [GET POSITION] Found existing position: ${position.amount.toFixed(0)} tokens`);
-          } else {
-            // No position yet, will be auto-initialized
-            context.variables.tokenBalance = 100000; // Default for new position
-            console.log(`📊 [GET POSITION] No position found, will use auto-init: 100,000 tokens`);
+            return true;
           }
-        } else {
-          // Fallback: assume auto-initialized position
-          context.variables.tokenBalance = 100000;
-          console.log(`📊 [GET POSITION] Using default position: 100,000 tokens`);
-        }        
+        }
+        
+        // Priority 3: No position found - emit warning for SELL strategies
+        console.warn(`⚠️ [GET POSITION] No position found for token ${tokenAddress.substring(0, 8)}...`);
+        console.warn(`⚠️ [GET POSITION] SELL strategies require either:`);
+        console.warn(`⚠️   1. User-specified 'supply' parameter in strategy config`);
+        console.warn(`⚠️   2. Existing token position in portfolio`);
+        console.warn(`⚠️ [GET POSITION] Using fallback: 100,000 tokens (may not reflect reality)`);
+        
+        // Fallback: Use default but warn user
+        context.variables.tokenBalance = 100000;
         return true;
       },
       onSuccess: 'fetch_token_price',
-      description: 'Get current token position size'
+      description: 'Get current token position size with proper validation'
     });
     
     // Step 1a: Fetch token price from market
@@ -1767,20 +1778,36 @@ export function createReactiveMirrorStrategy(config: {
           }
         }
         
-        // Fallback: Use last known price or safe default
-        if (context.variables.lastKnownPrice && context.variables.lastKnownPrice < 1) {
+        // Fallback: Use last known price ONLY if recent
+        if (context.variables.lastKnownPrice && 
+            context.variables.lastKnownPrice < 1 &&
+            context.variables.lastPriceTimestamp &&
+            (Date.now() - context.variables.lastPriceTimestamp) < 60000) {
+          // Price must be <1 minute old
+          
           context.variables.currentPrice = context.variables.lastKnownPrice;
-          console.log(`💰 [PRICE FALLBACK] Using last known TOKEN price: ${context.variables.lastKnownPrice.toFixed(10)} SOL per token`);
+          const ageSeconds = Math.floor((Date.now() - context.variables.lastPriceTimestamp) / 1000);
+          console.log(`💰 [PRICE FALLBACK] Using recent price (${ageSeconds}s old): ${context.variables.lastKnownPrice.toFixed(10)} SOL per token`);
+          return true;
         } else {
-          // Use a reasonable fallback based on typical token prices
-          context.variables.currentPrice = 0.0001; // 0.01 cents per token
-          console.warn(`⚠️ [PRICE FALLBACK] No valid price found, using default: 0.0001 SOL per token`);
+          // NO SAFE FALLBACK - FAIL THE EXECUTION
+          const errorMsg = context.variables.lastKnownPrice 
+            ? `Price data too stale (>${Math.floor((Date.now() - context.variables.lastPriceTimestamp) / 1000)}s old)`
+            : 'No valid price data available';
+          
+          console.error(`❌ [PRICE ERROR] ${errorMsg}`);
+          console.error(`❌ [PRICE ERROR] Cannot execute trade without current market price`);
+          
+          // Store error for user visibility
+          context.variables.executionError = errorMsg;
+          context.variables.executionSafelyStopped = true;
+          
+          return false; // STOP EXECUTION - DO NOT TRADE WITHOUT PRICE
         }
-        return true;
       },
       onSuccess: 'calculate_sell_amount',
       description: 'Validate TOKEN price in SOL (not SOL/USD price!)'
-    });
+  });
     
     // Step 2: Calculate EXACT sell amount based on mirror_buy_volume sizing rule
     steps.push({
@@ -1884,6 +1911,7 @@ export function createReactiveMirrorStrategy(config: {
         // Store price for next iteration if fetch failed
         if (context.stepResults?.get_current_price?.data?.price) {
           context.variables.lastKnownPrice = context.stepResults.get_current_price.data.price;
+          context.variables.lastPriceTimestamp = Date.now();
         }
         
         return true;
@@ -1950,16 +1978,32 @@ export function createReactiveMirrorStrategy(config: {
           }
         }
         
-        // Fallback
-        if (context.variables.lastKnownPrice && context.variables.lastKnownPrice < 1) {
+        // Fallback: Use last known price ONLY if recent
+        if (context.variables.lastKnownPrice && 
+            context.variables.lastKnownPrice < 1 &&
+            context.variables.lastPriceTimestamp &&
+            (Date.now() - context.variables.lastPriceTimestamp) < 60000) {
+          // Price must be <1 minute old
+          
           context.variables.currentPrice = context.variables.lastKnownPrice;
-          console.log(`💰 [BUY PRICE FALLBACK] Using last known TOKEN price: ${context.variables.lastKnownPrice.toFixed(10)} SOL per token`);
+          const ageSeconds = Math.floor((Date.now() - context.variables.lastPriceTimestamp) / 1000);
+          console.log(`💰 [BUY PRICE FALLBACK] Using recent price (${ageSeconds}s old): ${context.variables.lastKnownPrice.toFixed(10)} SOL per token`);
+          return true;
         } else {
-          context.variables.currentPrice = 0.0001;
-          console.warn(`⚠️ [BUY PRICE FALLBACK] No valid price found, using default: 0.0001 SOL per token`);
+          // NO SAFE FALLBACK - FAIL THE EXECUTION
+          const errorMsg = context.variables.lastKnownPrice 
+            ? `Price data too stale (>${Math.floor((Date.now() - context.variables.lastPriceTimestamp) / 1000)}s old)`
+            : 'No valid price data available';
+          
+          console.error(`❌ [BUY PRICE ERROR] ${errorMsg}`);
+          console.error(`❌ [BUY PRICE ERROR] Cannot execute trade without current market price`);
+          
+          // Store error for user visibility
+          context.variables.executionError = errorMsg;
+          context.variables.executionSafelyStopped = true;
+          
+          return false; // STOP EXECUTION - DO NOT TRADE WITHOUT PRICE
         }
-        
-        return true;
       },
       onSuccess: 'calculate_buy_amount',
       description: 'Validate TOKEN price in SOL (not SOL/USD price!)'
@@ -2029,6 +2073,7 @@ export function createReactiveMirrorStrategy(config: {
         // Store price for next iteration
         if (context.stepResults?.fetch_token_price_buy?.data?.price) {
           context.variables.lastKnownPrice = context.stepResults.fetch_token_price_buy.data.price;
+          context.variables.lastPriceTimestamp = Date.now();
         }
         
         return true;
