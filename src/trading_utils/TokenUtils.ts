@@ -859,7 +859,7 @@ async function getSolPriceUSD(): Promise<number> {
       return cachedSolPrice;
     }
 
-    // **SIMPLIFIED: Use DexScreener for SOL price (consistent with token price)**
+    // Use DexScreener for SOL price (consistent with token price)
 
     try {
       const controller = new AbortController();
@@ -909,7 +909,7 @@ async function getSolPriceUSD(): Promise<number> {
         return cachedSolPrice;
       }
 
-      // **LAST RESORT: Return reasonable estimate**
+      // Return reasonable estimate**
       //console.warn('All SOL price APIs failed, using fallback price: $150');
       return 150.0;
     }

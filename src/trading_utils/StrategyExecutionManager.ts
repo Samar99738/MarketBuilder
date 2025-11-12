@@ -22,6 +22,8 @@ import { exec } from "child_process";
 import e from "cors";
 import { timeStamp } from "console";
 import { DEFAULT_REQUEST_TIMEOUT_MSEC } from "@modelcontextprotocol/sdk/shared/protocol";
+import { DeallocateFundsRequest } from "fireblocks-sdk";
+import { findLogsByRunningId } from "../database/dal";
 
 export interface RunningStrategy {
   id: string;
@@ -1017,20 +1019,22 @@ export class StrategyExecutionManager {
       throw new Error(errorMsg);
     }
 
-    // Normalize to lowercase for consistent event matching
-    const normalizedToken = tokenAddress.toLowerCase();
-    
-    // Tell RealTradeFeedService to START polling this token!
-    console.log(`[StrategyExecutionManager] 🚀 Starting pump.fun trade polling for ${tokenAddress.substring(0, 8)}...`);
-    console.log(`[StrategyExecutionManager] 📝 Subscribing to: trade:${normalizedToken}`);
-    const subscribed = await this.realTradeFeed.subscribeToToken(normalizedToken, runningId);
+    // CRITICAL FIX: Pass ORIGINAL case-sensitive address to RealTradeFeedService
+    // It needs the proper Base58 format for API calls and on-chain queries
+    // Only normalize for event matching (listening), not for subscription
+    console.log(`[StrategyExecutionManager] 🚀 Starting real-time trade monitoring for ${tokenAddress.substring(0, 8)}...`);
+    console.log(`[StrategyExecutionManager] 📝 Token address: ${tokenAddress}`);
+    const subscribed = await this.realTradeFeed.subscribeToToken(tokenAddress, runningId);
     
     if (!subscribed) {
       console.error(`[StrategyExecutionManager] ❌ Failed to subscribe to token ${tokenAddress}`);
       return;
     }
     
-    // Now listen for the events using LOWERCASE token address
+    // Normalize to lowercase ONLY for event matching (listening to emitted events)
+    const normalizedToken = tokenAddress.toLowerCase();
+    
+    // Now listen for the events using LOWERCASE token address for consistent matching
     const eventHandler = (tradeEvent: any) => {
       console.log(`[StrategyExecutionManager] 🔔 Real trade detected for ${runningId}:`, tradeEvent);
       // Trigger immediate execution
@@ -1040,7 +1044,14 @@ export class StrategyExecutionManager {
     this.realTradeFeed.on(`trade:${normalizedToken}`, eventHandler);
     this.eventSubscriptions.set(runningId, { tokenAddress: normalizedToken, handler: eventHandler });
     
+    // Verify listener was registered
+    const listenerCount = this.realTradeFeed.listenerCount(`trade:${normalizedToken}`);
     console.log(`[StrategyExecutionManager] ✅ Subscribed ${runningId} to trade:${normalizedToken}`);
+    console.log(`[StrategyExecutionManager] 📊 Total listeners for this token: ${listenerCount}`);
+    
+    if (listenerCount === 0) {
+      console.error(`[StrategyExecutionManager] ⚠️ WARNING: Listener count is ZERO! Event handler may not be registered correctly!`);
+    }
   }
 
   // Real-time event handler
@@ -1112,7 +1123,6 @@ export class StrategyExecutionManager {
       // Strategy will continue execution on next cycle
     }
   }
-
   /**
    * Process execution queue for immediate event-driven execution
    */
@@ -1141,7 +1151,6 @@ export class StrategyExecutionManager {
       // Small yield to prevent blocking
       await new Promise(resolve => setImmediate(resolve));
     }
-
     this.processingQueue = false;
   }
 
@@ -1379,7 +1388,6 @@ private async executeImmediateAction(
       
       return false;
     }
-    
     recentExecutions.push(now);
     return true;
   }
@@ -1424,8 +1432,7 @@ private async executeImmediateAction(
       }
       
       return false;
-    }
-    
+    }    
     return true;
   }
 

@@ -284,7 +284,6 @@ Please suggest optimized parameters that would improve performance. Return ONLY 
         validated[key] = originalValue + conservativeChange;
       }
     }
-    
     return validated;
   }
 
@@ -328,7 +327,6 @@ Please suggest optimized parameters that would improve performance. Return ONLY 
         newVersion: strategy.version
       }
     });
-    
     return strategy;
   }
 
