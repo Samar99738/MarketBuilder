@@ -32,6 +32,8 @@ export interface TokenInfo {
     isPumpToken: boolean;
     bondingCurveAddress?: string;
     isGraduated?: boolean;
+    raydiumPoolAddress?: string;
+    poolType?: 'amm-v4' | 'clmm';
   };
 }
 
@@ -82,12 +84,22 @@ export class TokenRouter {
       };
     }
 
+    // CRITICAL FIX: Try to find original case-sensitive address in cache first
+    // The address might have been passed as lowercase from event matching
+    // but we need the original case for Base58 validation
+    const cachedByLowercase = this.findInCacheByLowercase(tokenMintOrSymbol);
+    if (cachedByLowercase) {
+      console.log(`[TokenRouter] Found cached token (case-insensitive match)`);
+      return this.buildRoute(cachedByLowercase);
+    }
+
     // Try to parse as mint address
     let mintAddress: PublicKey;
     try {
       mintAddress = new PublicKey(tokenMintOrSymbol);
     } catch (error) {
       // If not a valid address, might be a symbol - need to resolve it
+      console.log(`[TokenRouter] Invalid Base58 address: ${tokenMintOrSymbol}`);
       return {
         tokenInfo: {
           mintAddress: tokenMintOrSymbol,
@@ -354,6 +366,20 @@ export class TokenRouter {
    */
   private getFromCache(mintAddress: string): TokenInfo | null {
     return this.tokenCache.get(mintAddress) || null;
+  }
+
+  /**
+   * Find token in cache by lowercase comparison
+   * CRITICAL: Handles case where event matching uses lowercase but cache has original case
+   */
+  private findInCacheByLowercase(address: string): TokenInfo | null {
+    const lowerAddress = address.toLowerCase();
+    for (const [cachedAddress, tokenInfo] of this.tokenCache.entries()) {
+      if (cachedAddress.toLowerCase() === lowerAddress) {
+        return tokenInfo;
+      }
+    }
+    return null;
   }
 
   /**

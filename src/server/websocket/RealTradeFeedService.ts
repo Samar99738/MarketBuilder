@@ -8,6 +8,9 @@
 import { EventEmitter } from 'events';
 import { SolanaTradeMonitor } from './SolanaTradeMonitor';
 import { PumpFunWebSocketListener } from '../../trading_utils/PumpFunWebSocketListener';
+import { RaydiumWebSocketListener } from '../../trading_utils/RaydiumWebSocketListener';
+import { TokenRouter, getTokenRouter } from '../../trading_utils/TokenRouter';
+import { Connection } from '@solana/web3.js';
 import { Server as SocketServer } from 'socket.io';
 import { IDL } from '../../idl/pump.idl';
 import type { Idl } from '@coral-xyz/anchor';
@@ -44,6 +47,8 @@ export interface TradeStats {
 export class RealTradeFeedService extends EventEmitter {
   private tradeMonitor: SolanaTradeMonitor;
   private webSocketListener?: PumpFunWebSocketListener;
+  private raydiumListener?: RaydiumWebSocketListener;
+  private tokenRouter: TokenRouter;
   private io: SocketServer;
   private rpcUrl: string;
   
@@ -73,11 +78,18 @@ export class RealTradeFeedService extends EventEmitter {
     this.rpcUrl = rpcUrl || 'https://api.mainnet-beta.solana.com';
     this.tradeMonitor = new SolanaTradeMonitor(io, rpcUrl);
     
+    // Initialize token router for smart routing
+    const connection = new Connection(this.rpcUrl, 'confirmed');
+    this.tokenRouter = getTokenRouter(connection);
+    
     // Initialize PumpFun WebSocket Listener (bonding curve tokens only)
     this.webSocketListener = new PumpFunWebSocketListener(
       this.rpcUrl,
       IDL as Idl
     );
+
+    // Initialize Raydium WebSocket Listener (graduated tokens)
+    this.raydiumListener = new RaydiumWebSocketListener(this.rpcUrl);
     
     this.setupEventHandlers();
     this.setupEventForwarding();
@@ -114,10 +126,20 @@ export class RealTradeFeedService extends EventEmitter {
       this.updateTradeStats(trade);
 
       // Emit to token-specific listeners (for strategies)
-      // This is how strategies receive real-time trade data!
+      // CRITICAL: Emit with BOTH original case AND lowercase for maximum compatibility
+      // Strategies listen with lowercase, but we want to support both
       this.emit(`trade:${tokenAddress}`, trade);
+      
+      // Also emit lowercase version for consistent event matching
+      const lowercaseAddress = tokenAddress.toLowerCase();
+      if (lowercaseAddress !== tokenAddress) {
+        this.emit(`trade:${lowercaseAddress}`, trade);
+      }
+      
       console.log(`📡 [RealTradeFeedService] Emitted event: trade:${tokenAddress}`);
-      console.log(`📡 [RealTradeFeedService] Listeners for this token: ${this.listenerCount(`trade:${tokenAddress}`)}`);
+      console.log(`📡 [RealTradeFeedService] Emitted event: trade:${lowercaseAddress}`);
+      console.log(`📡 [RealTradeFeedService] Listeners (original): ${this.listenerCount(`trade:${tokenAddress}`)}`);
+      console.log(`📡 [RealTradeFeedService] Listeners (lowercase): ${this.listenerCount(`trade:${lowercaseAddress}`)}`);
 
       // Emit event for strategies to consume
       this.emit('real_trade', trade);
@@ -220,6 +242,31 @@ export class RealTradeFeedService extends EventEmitter {
       console.log('[RealTradeFeedService] ✅ Event handlers connected to PumpFunWebSocketListener');
       console.log('[RealTradeFeedService] 🔥 Monitoring pump.fun bonding curve tokens');
     }
+
+    // Listen for real trades from Raydium WebSocket Listener (graduated tokens)
+    if (this.raydiumListener) {
+      this.raydiumListener.on('trade', (tradeData: any) => {
+        // Convert Raydium trade format to RealTradeEvent format
+        const trade: RealTradeEvent = {
+          tokenAddress: tradeData.tokenMint.toLowerCase(),
+          type: tradeData.isBuy ? 'buy' : 'sell',
+          solAmount: tradeData.solAmount,
+          tokenAmount: tradeData.tokenAmount,
+          trader: tradeData.user,
+          signature: tradeData.signature || 'raydium-' + Date.now(),
+          timestamp: tradeData.timestamp * 1000,
+          price: tradeData.price,
+          isRealTrade: true,
+        };
+        
+        console.log(`🌊 [RealTradeFeedService] Raydium trade detected (graduated token)`);
+        
+        this.handleRealTrade(trade);
+      });
+      
+      console.log('[RealTradeFeedService] ✅ Event handlers connected to RaydiumWebSocketListener');
+      console.log('[RealTradeFeedService] 🌊 Monitoring Raydium graduated tokens');
+    }
   }
 
   /**
@@ -251,12 +298,11 @@ export class RealTradeFeedService extends EventEmitter {
    * Check if we're still receiving trades
    */
   private checkConnectionHealth(): void {
-    // Only check if we have monitored tokens
-    if (!this.webSocketListener) {
-      return;
-    }
+    // Get monitored tokens from both listeners
+    const pumpTokens = this.webSocketListener?.getMonitoredTokens() || [];
+    const raydiumTokens = this.raydiumListener?.getMonitoredTokens() || [];
+    const monitoredTokens = [...pumpTokens, ...raydiumTokens];
     
-    const monitoredTokens = this.webSocketListener.getMonitoredTokens();
     if (monitoredTokens.length === 0) {
       return;
     }
@@ -281,6 +327,8 @@ export class RealTradeFeedService extends EventEmitter {
         this.io.emit('websocket:health:warning', {
           status: 'stale',
           minutesSinceLastTrade,
+          pumpFunActive: this.webSocketListener?.isActive() || false,
+          raydiumActive: this.raydiumListener?.isActive() || false,
           message: 'No trades detected recently. Connection may be dead.',
           timestamp: Date.now()
         });
@@ -308,19 +356,28 @@ export class RealTradeFeedService extends EventEmitter {
     try {
       console.log('[RealTradeFeedService] 🔄 Attempting WebSocket reconnection...');
       
+      // Reconnect PumpFun listener
       if (this.webSocketListener) {
-        // Get current monitored tokens using public method
-        const tokens = this.webSocketListener.getMonitoredTokens();
-        
-        // Stop current connection
-        await this.webSocketListener.stop();
-        
-        // Restart for each token
-        for (const token of tokens) {
-          await this.webSocketListener.start(token);
+        const pumpTokens = this.webSocketListener.getMonitoredTokens();
+        if (pumpTokens.length > 0) {
+          await this.webSocketListener.stop();
+          for (const token of pumpTokens) {
+            await this.webSocketListener.start(token);
+          }
+          console.log(`[RealTradeFeedService] ✅ PumpFun reconnected: ${pumpTokens.length} tokens`);
         }
-        
-        console.log(`[RealTradeFeedService] ✅ Reconnection complete for ${tokens.length} tokens`);
+      }
+
+      // Reconnect Raydium listener
+      if (this.raydiumListener) {
+        const raydiumTokens = this.raydiumListener.getMonitoredTokens();
+        if (raydiumTokens.length > 0) {
+          await this.raydiumListener.stop();
+          for (const token of raydiumTokens) {
+            await this.raydiumListener.start(token);
+          }
+          console.log(`[RealTradeFeedService] ✅ Raydium reconnected: ${raydiumTokens.length} tokens`);
+        }
       }
     } catch (error) {
       console.error('[RealTradeFeedService] ❌ Reconnection failed:', error);
@@ -359,6 +416,10 @@ export class RealTradeFeedService extends EventEmitter {
     if (this.webSocketListener) {
       await this.webSocketListener.stop();
     }
+
+    if (this.raydiumListener) {
+      await this.raydiumListener.stop();
+    }
     
     this.removeAllListeners();
     console.log('[RealTradeFeedService] Service stopped');
@@ -366,22 +427,50 @@ export class RealTradeFeedService extends EventEmitter {
 
   /**
    * Subscribe to real trades for a token
-   *  This starts WebSocket monitoring for the token
+   * Intelligently routes to PumpFun or Raydium listener based on token type
    */
   async subscribeToToken(tokenAddress: string, socketId: string): Promise<boolean> {
     try {
       console.log(`\n🚀 ========== SUBSCRIBE TO TOKEN ==========`);
-      console.log(`🚀 Token (received): ${tokenAddress}`);
-      console.log(`🚀 Token length: ${tokenAddress.length}`);
-      console.log(`🚀 Token is lowercase: ${tokenAddress === tokenAddress.toLowerCase()}`);
+      console.log(`🚀 Token: ${tokenAddress}`);
       console.log(`🚀 Subscriber: ${socketId}`);
       
-      // Use WebSocket for REAL-TIME trade detection
-      if (this.webSocketListener) {
-        console.log(`🚀 Passing to WebSocket: ${tokenAddress}`);
-        await this.webSocketListener.start(tokenAddress);
-        
-        // Initialize stats if not exists
+      // Use TokenRouter to determine token type
+      const route = await this.tokenRouter.route(tokenAddress);
+      
+      console.log(`🔍 [RealTradeFeedService] Token Type: ${route.tokenInfo.type}`);
+      console.log(`� [RealTradeFeedService] Routing: ${route.reason}`);
+      
+      // Determine which listener to use
+      let success = false;
+      
+      if (route.tokenInfo.metadata?.isPumpToken && !route.tokenInfo.metadata?.isGraduated) {
+        // Use PumpFun listener for active bonding curve tokens
+        if (this.webSocketListener) {
+          console.log(`� [RealTradeFeedService] Using PumpFun WebSocket listener`);
+          await this.webSocketListener.start(tokenAddress);
+          success = true;
+        }
+      } else {
+        // Use Raydium listener for graduated or standard tokens
+        if (this.raydiumListener) {
+          console.log(`🌊 [RealTradeFeedService] Using Raydium WebSocket listener`);
+          try {
+            await this.raydiumListener.start(tokenAddress);
+            success = true;
+          } catch (error) {
+            console.error(`⚠️ [RealTradeFeedService] Raydium listener failed, falling back to PumpFun`, error);
+            // Fallback to PumpFun if Raydium fails
+            if (this.webSocketListener) {
+              await this.webSocketListener.start(tokenAddress);
+              success = true;
+            }
+          }
+        }
+      }
+      
+      if (success) {
+        // Initialize stats
         if (!this.tradeStats.has(tokenAddress)) {
           this.tradeStats.set(tokenAddress, {
             tokenAddress,
@@ -399,15 +488,13 @@ export class RealTradeFeedService extends EventEmitter {
           this.recentTrades.set(tokenAddress, []);
         }
         
-        console.log(`✅ [RealTradeFeedService] Subscribed to REAL pump.fun trades for ${tokenAddress.substring(0, 8)}...`);
-        console.log(`🔥 [RealTradeFeedService] WebSocket monitoring ACTIVE for real-time trades`);
+        console.log(`✅ [RealTradeFeedService] Subscribed to real-time trades for ${tokenAddress.substring(0, 8)}...`);
         console.log(`🔥 ==========================================\n`);
-        
-        return true;
       } else {
-        console.error(`❌ [RealTradeFeedService] WebSocket listener not initialized`);
-        return false;
+        console.error(`❌ [RealTradeFeedService] No listener available`);
       }
+      
+      return success;
     } catch (error) {
       console.error(`❌ [RealTradeFeedService] Error subscribing to token:`, error);
       return false;
@@ -418,9 +505,15 @@ export class RealTradeFeedService extends EventEmitter {
    * Unsubscribe from token trades
    */
   async unsubscribeFromToken(tokenAddress: string, socketId: string): Promise<void> {
-    if (this.webSocketListener) {
+    // Try both listeners (one will be monitoring this token)
+    if (this.webSocketListener && this.webSocketListener.isMonitoringToken(tokenAddress)) {
       await this.webSocketListener.stopToken(tokenAddress);
-      console.log(`🛑 [RealTradeFeedService] Unsubscribed from ${tokenAddress}`);
+      console.log(`🛑 [RealTradeFeedService] Unsubscribed from PumpFun: ${tokenAddress}`);
+    }
+    
+    if (this.raydiumListener && this.raydiumListener.isMonitoringToken(tokenAddress)) {
+      await this.raydiumListener.stopToken(tokenAddress);
+      console.log(`🛑 [RealTradeFeedService] Unsubscribed from Raydium: ${tokenAddress}`);
     }
   }
 
@@ -515,23 +608,30 @@ export class RealTradeFeedService extends EventEmitter {
    * Check if a token is being monitored
    */
   isMonitoring(tokenAddress: string): boolean {
-    return this.webSocketListener 
-      ? this.webSocketListener.isMonitoringToken(tokenAddress)
-      : false;
+    const isPumpMonitoring = this.webSocketListener?.isMonitoringToken(tokenAddress) || false;
+    const isRaydiumMonitoring = this.raydiumListener?.isMonitoringToken(tokenAddress) || false;
+    return isPumpMonitoring || isRaydiumMonitoring;
   }
 
   /**
    * Get service statistics
    */
   getStats() {
-    const monitoredTokens = this.webSocketListener?.getMonitoredTokens() || [];
+    const pumpTokens = this.webSocketListener?.getMonitoredTokens() || [];
+    const raydiumTokens = this.raydiumListener?.getMonitoredTokens() || [];
+    const totalMonitored = pumpTokens.length + raydiumTokens.length;
+    
     return {
-      tokensMonitored: monitoredTokens.length,
+      tokensMonitored: totalMonitored,
+      pumpFunTokens: pumpTokens.length,
+      raydiumTokens: raydiumTokens.length,
       tokensWithStats: this.tradeStats.size,
       totalTradesBuffered: Array.from(this.recentTrades.values())
         .reduce((sum, trades) => sum + trades.length, 0),
-      method: 'PumpFun WebSocket monitoring (bonding curve only)',
-      isConnected: monitoredTokens.length > 0,
+      method: 'Dual WebSocket monitoring (PumpFun + Raydium)',
+      pumpFunConnected: this.webSocketListener?.isActive() || false,
+      raydiumConnected: this.raydiumListener?.isActive() || false,
+      isConnected: totalMonitored > 0,
     };
   }
 
