@@ -131,6 +131,7 @@ export class TokenRouter {
    * Detect what type of token this is
    */
   private async detectTokenType(mintAddress: PublicKey): Promise<TokenInfo> {
+    console.log(`\n🔍 [TokenRouter] Detecting token type for: ${mintAddress.toString().substring(0, 12)}...`);
 
     const tokenInfo: TokenInfo = {
       mintAddress: mintAddress.toString(),
@@ -143,38 +144,67 @@ export class TokenRouter {
       const mintAccountInfo = await this.connection.getAccountInfo(mintAddress);
       
       if (!mintAccountInfo) {
+        console.log(`❌ [TokenRouter] Mint account doesn't exist`);
         return tokenInfo;
       }
-      //console.log(`Token mint account exists`);
+      console.log(`✅ [TokenRouter] Mint account exists`);
       tokenInfo.isValid = true;
 
-      // Strategy 2: Check if it's a pump.fun token via program derivation
-      const isPumpToken = await this.isPumpFunToken(mintAddress);
+      // PRODUCTION FIX: Strategy 2 - Check if it's a pump.fun token with comprehensive graduation detection
+      const pumpTokenData = await this.isPumpFunToken(mintAddress);
+      console.log(`🔍 [TokenRouter] isPumpToken check result:`, pumpTokenData);
       
-      if (isPumpToken) {
+      if (pumpTokenData.isPumpToken) {
+        // Initialize as pump token
         tokenInfo.type = TokenType.PUMP_FUN;
         tokenInfo.metadata = {
           isPumpToken: true,
+          isGraduated: pumpTokenData.isGraduated || false,
         };
 
         // Try to get bonding curve info
         try {
           const bondingCurveAddress = await this.getBondingCurvePDA(mintAddress);
           tokenInfo.metadata.bondingCurveAddress = bondingCurveAddress.toString();
+          console.log(`🔍 [TokenRouter] Bonding curve address: ${bondingCurveAddress.toString().substring(0, 12)}...`);
           
-          // Check if graduated (bonding curve complete)
-          const isGraduated = await this.isBondingCurveGraduated(bondingCurveAddress);
+          // PRODUCTION FIX: Check graduation status from multiple sources
+          let isGraduated = pumpTokenData.isGraduated || false;
+          
+          // Double-check with on-chain data if API didn't provide status
+          if (!pumpTokenData.fromAPI) {
+            const onChainGraduated = await this.isBondingCurveGraduated(bondingCurveAddress);
+            isGraduated = onChainGraduated;
+            console.log(`🔗 [TokenRouter] On-chain graduation check: ${onChainGraduated}`);
+          }
+          
           tokenInfo.metadata.isGraduated = isGraduated;
+          console.log(`🔍 [TokenRouter] isGraduated (final): ${isGraduated}`);
           
+          // CRITICAL: Graduated tokens MUST use Jupiter/Raydium
           if (isGraduated) {
+            console.log(`🎓 [TokenRouter] Token GRADUATED → Setting type to JUPITER`);
+            console.log(`   ⚠️  IMPORTANT: Graduated tokens only trade on Raydium, NOT Pump.fun!`);
+            console.log(`   🎯 This strategy will use Raydium WebSocket monitoring`);
             tokenInfo.type = TokenType.JUPITER;
+          } else {
+            console.log(`🚀 [TokenRouter] Token still on bonding curve → Keeping type as PUMP_FUN`);
+            console.log(`   🎯 This strategy will use Pump.fun WebSocket monitoring`);
           }
         } catch (error) {
+          console.error(`⚠️ [TokenRouter] Error checking graduation status:`, error);
+          // If we can't check graduation, default to Jupiter to be safe
+          console.warn(`⚠️ [TokenRouter] Defaulting to JUPITER due to graduation check failure`);
+          tokenInfo.type = TokenType.JUPITER;
         }
+        
+        console.log(`✅ [TokenRouter] Final token type: ${tokenInfo.type}`);
+        console.log(`📊 [TokenRouter] Metadata:`, JSON.stringify(tokenInfo.metadata, null, 2));
         return tokenInfo;
       }
 
       // Strategy 3: It's a standard SPL token
+      console.log(`📝 [TokenRouter] Not a Pump.fun token → Setting type to JUPITER`);
       tokenInfo.type = TokenType.JUPITER;
       
       // Try to get token metadata
@@ -195,36 +225,91 @@ export class TokenRouter {
 
   /**
    * Check if token is a pump.fun token by deriving bonding curve PDA
+   * PRODUCTION FIX: Returns structured data including graduation status
    */
-  private async isPumpFunToken(mintAddress: PublicKey): Promise<boolean> {
+  private async isPumpFunToken(mintAddress: PublicKey): Promise<{
+    isPumpToken: boolean;
+    isGraduated?: boolean;
+    fromAPI: boolean;
+  }> {
     try {
-      // Strategy 1: Check on-chain bonding curve PDA
-      const bondingCurve = await this.getBondingCurvePDA(mintAddress);
+      console.log(`🔍 [TokenRouter] Checking if Pump.fun token...`);
       
-      // Check if the bonding curve account exists
-      const accountInfo = await this.connection.getAccountInfo(bondingCurve);
-      
-      // If account exists and is owned by pump.fun program, it's a pump token
-      if (accountInfo && accountInfo.owner.equals(PUMP_FUN_PROGRAM_ID)) {
-        return true;
-      }
-
-      // Strategy 2: Check pump.fun API as fallback
+      // PRODUCTION FIX: Strategy 1 - Check pump.fun API FIRST (most reliable for graduation status)
       try {
-        const response = await fetch(`https://frontend-api.pump.fun/coins/${mintAddress.toString()}`);
+        console.log(`🌐 [TokenRouter] Trying Pump.fun API...`);
+        const response = await fetch(`https://frontend-api.pump.fun/coins/${mintAddress.toString()}`, {
+          headers: {
+            'Accept': 'application/json',
+            'User-Agent': 'Mozilla/5.0'
+          },
+          signal: AbortSignal.timeout(8000) // 8 second timeout
+        });
         
         if (response.ok) {
           const data = await response.json() as any;
           // If API returns data, it's a pump.fun token
           if (data && (data.mint || data.name || data.symbol)) {
-            return true;
+            // CRITICAL: Check 'complete' field to determine graduation
+            const isGraduated = data.complete === true || data.raydium_pool !== undefined;
+            
+            console.log(`✅ [TokenRouter] Found in Pump.fun API:`, {
+              name: data.name,
+              symbol: data.symbol,
+              complete: data.complete,
+              isGraduated: isGraduated,
+              hasRaydiumPool: !!data.raydium_pool
+            });
+            
+            return {
+              isPumpToken: true,
+              isGraduated: isGraduated,
+              fromAPI: true
+            };
           }
+        } else {
+          console.log(`⚠️ [TokenRouter] Pump.fun API returned ${response.status}`);
         }
       } catch (apiError) {
-    }
-      return false;
+        console.log(`⚠️ [TokenRouter] Pump.fun API error:`, apiError instanceof Error ? apiError.message : 'Unknown');
+      }
+
+      // PRODUCTION FIX: Strategy 2 - Check on-chain bonding curve PDA as fallback
+      console.log(`🔗 [TokenRouter] Checking on-chain bonding curve...`);
+      const bondingCurve = await this.getBondingCurvePDA(mintAddress);
+      console.log(`🔍 [TokenRouter] Derived bonding curve PDA: ${bondingCurve.toString().substring(0, 12)}...`);
+      
+      // Check if the bonding curve account exists
+      const accountInfo = await this.connection.getAccountInfo(bondingCurve);
+      
+      if (!accountInfo) {
+        console.log(`❌ [TokenRouter] Bonding curve account doesn't exist`);
+        return { isPumpToken: false, fromAPI: false };
+      }
+      
+      console.log(`📊 [TokenRouter] Bonding curve account exists, owner: ${accountInfo.owner.toString().substring(0, 12)}...`);
+      console.log(`📊 [TokenRouter] Expected owner (Pump.fun): ${PUMP_FUN_PROGRAM_ID.toString().substring(0, 12)}...`);
+      
+      // If account exists and is owned by pump.fun program, it's a pump token
+      if (accountInfo.owner.equals(PUMP_FUN_PROGRAM_ID)) {
+        console.log(`✅ [TokenRouter] Confirmed: Bonding curve owned by Pump.fun program`);
+        
+        // Check graduation status from on-chain data
+        const isGraduated = await this.isBondingCurveGraduated(bondingCurve);
+        
+        return {
+          isPumpToken: true,
+          isGraduated: isGraduated,
+          fromAPI: false
+        };
+      } else {
+        console.log(`❌ [TokenRouter] Bonding curve NOT owned by Pump.fun program`);
+      }
+
+      return { isPumpToken: false, fromAPI: false };
     } catch (error) {
-      return false;
+      console.error(`❌ [TokenRouter] Error in isPumpFunToken:`, error);
+      return { isPumpToken: false, fromAPI: false };
     }
   }
 

@@ -87,9 +87,7 @@ export class ProductionAlertSystem extends EventEmitter {
     this.dispatchAlert(alert);
   }
 
-  
    // Convenience methods
-   
   info(title: string, message: string, metadata?: any): void {
     this.alert('info', title, message, metadata);
   }
@@ -165,6 +163,13 @@ export class ProductionAlertSystem extends EventEmitter {
   getAlertsByLevel(level: Alert['level']): Alert[] {
     return this.alerts.filter(a => a.level === level);
   }
+
+  // /**
+  //  * Get all alerts
+  //  */
+  // getAllAlerts(): Alert[] {
+  //   return this.alerts;
+  // }
 
   /**
    * Reset critical alert counter

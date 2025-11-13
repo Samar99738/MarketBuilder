@@ -54,13 +54,17 @@ export class PoolDiscovery {
     }
 
     console.log(`🔍 [PoolDiscovery] Searching for pool: ${tokenMint.substring(0, 8)}...`);
+    console.log(`🔍 [PoolDiscovery] Full token address: ${tokenMint}`);
 
     // Method 1: Try Raydium API (fastest)
     console.log(`[PoolDiscovery] Trying Raydium API...`);
     try {
       const poolInfo = await this.findPoolViaAPI(tokenMint);
       if (poolInfo) {
-        console.log(`✅ [PoolDiscovery] Found pool via Raydium API: ${poolInfo.poolAddress}`);
+        console.log(`✅ [PoolDiscovery] Found pool via Raydium API:`);
+        console.log(`   Pool Address: ${poolInfo.poolAddress}`);
+        console.log(`   Base Mint: ${poolInfo.baseMint.substring(0, 12)}...`);
+        console.log(`   Quote Mint: ${poolInfo.quoteMint.substring(0, 12)}...`);
         this.saveToCache(tokenMint, poolInfo);
         return poolInfo;
       }
@@ -74,7 +78,10 @@ export class PoolDiscovery {
     try {
       const poolInfo = await this.findPoolViaDexScreener(tokenMint);
       if (poolInfo) {
-        console.log(`✅ [PoolDiscovery] Found pool via DexScreener: ${poolInfo.poolAddress}`);
+        console.log(`✅ [PoolDiscovery] Found pool via DexScreener:`);
+        console.log(`   Pool Address: ${poolInfo.poolAddress}`);
+        console.log(`   Base Mint: ${poolInfo.baseMint.substring(0, 12)}...`);
+        console.log(`   Quote Mint: ${poolInfo.quoteMint.substring(0, 12)}...`);
         this.saveToCache(tokenMint, poolInfo);
         return poolInfo;
       }
@@ -169,13 +176,17 @@ export class PoolDiscovery {
 
   /**
    * Method 2: Find pool via DexScreener API (most reliable)
+   * PRODUCTION FIX: Enhanced retry logic, better error handling, pool validation
    */
   private async findPoolViaDexScreener(tokenMint: string): Promise<PoolInfo | null> {
     try {
       const apiUrl = `https://api.dexscreener.com/latest/dex/tokens/${tokenMint}`;
       
-      // Retry logic for network issues
-      let retries = 3;
+      // PRODUCTION FIX: Configurable retry parameters
+      const MAX_RETRIES = 3;
+      const RETRY_DELAY_MS = 1000;
+      const REQUEST_TIMEOUT_MS = 10000;
+      let retries = MAX_RETRIES;
       let data: any = null;
 
       while (retries > 0) {
@@ -185,13 +196,14 @@ export class PoolDiscovery {
               'Accept': 'application/json',
               'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
             },
-            signal: AbortSignal.timeout(10000) // 10 second timeout
+            signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS)
           });
 
           if (!response.ok) {
+            console.warn(`⚠️ [PoolDiscovery] DexScreener returned status ${response.status}, retries left: ${retries - 1}`);
             retries--;
             if (retries > 0) {
-              await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1s before retry
+              await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS));
               continue;
             }
             return null;
@@ -200,9 +212,10 @@ export class PoolDiscovery {
           data = await response.json();
           break; // Success
         } catch (err) {
+          console.warn(`⚠️ [PoolDiscovery] DexScreener fetch error: ${err instanceof Error ? err.message : 'Unknown'}, retries left: ${retries - 1}`);
           retries--;
           if (retries > 0) {
-            await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1s before retry
+            await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS));
             continue;
           }
           throw err;
@@ -210,36 +223,61 @@ export class PoolDiscovery {
       }
 
       if (!data || !data.pairs || !Array.isArray(data.pairs) || data.pairs.length === 0) {
+        console.warn(`⚠️ [PoolDiscovery] No pairs found for token ${tokenMint.substring(0, 8)}...`);
         return null;
       }
 
-      // Find Raydium pools (filter out other DEXs)
-      const raydiumPools = data.pairs.filter((pair: any) => 
-        pair.dexId === 'raydium' && 
-        (pair.quoteToken?.address === NATIVE_SOL_MINT || pair.baseToken?.address === NATIVE_SOL_MINT)
-      );
-
-      if (raydiumPools.length > 0) {
-        // Get pool with highest liquidity
-        const pool = raydiumPools.sort((a: any, b: any) => 
-          (b.liquidity?.usd || 0) - (a.liquidity?.usd || 0)
-        )[0];
-
-        console.log(`✅ [PoolDiscovery] Found pool via DexScreener: ${pool.pairAddress}`);
+      // PRODUCTION FIX: Support MULTIPLE DEX types (Raydium, Meteora, Orca, Phoenix)
+      // This makes the system flexible for ALL Solana DEXs
+      const SUPPORTED_DEXS = ['raydium', 'meteora', 'orca', 'phoenix', 'lifinity'];
+      
+      const validPools = data.pairs.filter((pair: any) => {
+        const isDexSupported = SUPPORTED_DEXS.includes(pair.dexId?.toLowerCase());
+        const hasSolPair = pair.quoteToken?.address === NATIVE_SOL_MINT || pair.baseToken?.address === NATIVE_SOL_MINT;
+        const hasLiquidity = (pair.liquidity?.usd || 0) > 50; // Minimum $50 liquidity
+        const has24hVolume = (pair.volume?.h24 || 0) > 0; // Must have some trading activity
+        const has24hTxns = (pair.txns?.h24?.buys || 0) + (pair.txns?.h24?.sells || 0) > 0; // Must have transactions
         
-        return {
-          poolAddress: pool.pairAddress,
-          tokenMint: tokenMint,
-          baseMint: pool.baseToken.address === tokenMint ? pool.baseToken.address : pool.quoteToken.address,
-          quoteMint: pool.baseToken.address === NATIVE_SOL_MINT ? pool.baseToken.address : pool.quoteToken.address,
-          baseDecimals: 6,
-          quoteDecimals: 9
-        };
+        // PRODUCTION FIX: Allow boosted pools - they're often legitimate and actively traded
+        return isDexSupported && hasSolPair && hasLiquidity && has24hVolume && has24hTxns;
+      });
+
+      if (validPools.length === 0) {
+        console.warn(`⚠️ [PoolDiscovery] No valid pools found (${data.pairs.length} total pairs checked)`);
+        console.warn(`   Checked DEXs: ${SUPPORTED_DEXS.join(', ')}`);
+        return null;
       }
 
-      return null;
+      // PRODUCTION FIX: Get pool with highest liquidity AND verify it's active
+      const pool = validPools.sort((a: any, b: any) => {
+        const liquidityA = a.liquidity?.usd || 0;
+        const liquidityB = b.liquidity?.usd || 0;
+        return liquidityB - liquidityA;
+      })[0];
+
+      console.log(`✅ [PoolDiscovery] Found pool via DexScreener: ${pool.pairAddress}`);
+      console.log(`   DEX: ${pool.dexId.toUpperCase()} 🔥`);
+      console.log(`   Liquidity: $${pool.liquidity?.usd?.toLocaleString() || '0'}`);
+      console.log(`   24h Volume: $${pool.volume?.h24?.toLocaleString() || '0'}`);
+      console.log(`   24h Txns: ${pool.txns?.h24?.buys || 0} buys, ${pool.txns?.h24?.sells || 0} sells`);
+      
+      // PRODUCTION FIX: Warn if pool has no recent activity
+      const has24hActivity = (pool.txns?.h24?.buys || 0) + (pool.txns?.h24?.sells || 0) > 0;
+      if (!has24hActivity) {
+        console.warn(`⚠️ [PoolDiscovery] WARNING: Pool ${pool.pairAddress.substring(0, 8)}... has NO 24h activity!`);
+        console.warn(`   This pool might be inactive or abandoned. Trades may not be detected.`);
+      }
+      
+      return {
+        poolAddress: pool.pairAddress,
+        tokenMint: tokenMint,
+        baseMint: pool.baseToken.address === tokenMint ? pool.baseToken.address : pool.quoteToken.address,
+        quoteMint: pool.baseToken.address === NATIVE_SOL_MINT ? pool.baseToken.address : pool.quoteToken.address,
+        baseDecimals: pool.baseToken.address === tokenMint ? (pool.info?.baseDecimals || 6) : (pool.info?.quoteDecimals || 9),
+        quoteDecimals: pool.baseToken.address === NATIVE_SOL_MINT ? 9 : (pool.quoteToken.address === NATIVE_SOL_MINT ? 9 : 6)
+      };
     } catch (error) {
-      // Silent fail, will try on-chain
+      console.error(`❌ [PoolDiscovery] DexScreener search failed:`, error instanceof Error ? error.message : error);
       return null;
     }
   }

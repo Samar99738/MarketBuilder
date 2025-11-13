@@ -198,7 +198,6 @@ class MonitoringService {
     if (this.metricsHistory.length > this.MAX_HISTORY) {
       this.metricsHistory.shift();
     }
-    
     return snapshot;
   }
 

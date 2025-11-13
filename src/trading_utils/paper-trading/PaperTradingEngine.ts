@@ -510,11 +510,11 @@ export class PaperTradingEngine {
           type: 'buy', // Add type for compatibility
           amount: amountSOL, // Show SOL amount
           amountSOL: amountSOL, // Explicit SOL amount
-          amountTokens: tokensReceived, // ⭐ ADD: Tokens received
+          amountTokens: tokensReceived, // Tokens received
           amountUSD: solToUSD, // Show USD equivalent
           price: basePrice, // Token price in SOL
-          priceUSD: marketData.priceUSD, // ⭐ FIX: Token price in USD (not SOL price)
-          tokenSymbol: marketData.tokenSymbol, // ⭐ ADD: Token symbol
+          priceUSD: marketData.priceUSD, // Token price in USD (not SOL price)
+          tokenSymbol: marketData.tokenSymbol, // Token symbol
           baseToken: 'SOL',
           quoteToken: marketData.tokenSymbol,
           pnl: 0, // No P&L on buy
@@ -680,10 +680,10 @@ export class PaperTradingEngine {
           sessionId,
           type: 'buy_simulation',
           side: 'buy',
-          amountSOL: amountSOL, // ⭐ ADD: SOL spent
-          amountTokens: tokensReceived, // ⭐ ADD: Tokens received
-          tokenSymbol: marketData.tokenSymbol, // ⭐ ADD: Token symbol
-          priceUSD: marketData.priceUSD, // ⭐ ADD: Token price in USD
+          amountSOL: amountSOL, // SOL spent
+          amountTokens: tokensReceived, // Tokens received
+          tokenSymbol: marketData.tokenSymbol, // Token symbol
+          priceUSD: marketData.priceUSD, // Token price in USD
           timestamp: Date.now(),
           
           // Complete portfolio snapshot

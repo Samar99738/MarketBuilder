@@ -32,6 +32,12 @@ export class PumpFunWebSocketListener extends EventEmitter {
   private reconnectAttempts = 0;
   private maxReconnectAttempts = 5;
   private rpcUrl: string;
+  
+  // PRODUCTION FIX: Health monitoring
+  private lastEventTimestamp: number = Date.now();
+  private healthCheckInterval: NodeJS.Timeout | null = null;
+  private readonly HEALTH_CHECK_INTERVAL_MS = 60000; // Check every minute
+  private readonly MAX_SILENCE_DURATION_MS = 300000; // 5 minutes without events = potential issue
 
   constructor(rpcUrl: string, idl: Idl) {
     super();
@@ -85,6 +91,7 @@ export class PumpFunWebSocketListener extends EventEmitter {
 
   /**
    * Subscribe to pump.fun program logs
+   * PRODUCTION FIX: Added health monitoring and better error handling
    */
   private async subscribe(): Promise<void> {
     try {
@@ -104,8 +111,13 @@ export class PumpFunWebSocketListener extends EventEmitter {
 
       this.isMonitoring = true;
       this.reconnectAttempts = 0;
+      this.lastEventTimestamp = Date.now(); // Reset health check
+      
       console.log(`✅ [PumpFunWebSocket] Connected! Subscription ID: ${this.subscriptionId}`);
       console.log(`🎧 [PumpFunWebSocket] Listening for trades on ${this.monitoredTokens.size} token(s)`);
+      
+      // PRODUCTION FIX: Start health monitoring
+      this.startHealthMonitoring();
       
       // Emit connection event
       this.emit('connected');
@@ -151,9 +163,13 @@ export class PumpFunWebSocketListener extends EventEmitter {
 
   /**
    * Process a trade event and emit if it matches monitored tokens
+   * PRODUCTION FIX: Updates health monitoring timestamp
    */
   private processTradeEvent(event: Event): void {
     try {
+      // PRODUCTION FIX: Update health timestamp
+      this.lastEventTimestamp = Date.now();
+      
       const data = event.data as any;
       
       // CRITICAL: Ensure mint is properly converted to string
@@ -230,10 +246,85 @@ export class PumpFunWebSocketListener extends EventEmitter {
   }
 
   /**
+   * PRODUCTION FIX: Start health monitoring
+   */
+  private startHealthMonitoring(): void {
+    // Clear existing interval
+    if (this.healthCheckInterval) {
+      clearInterval(this.healthCheckInterval);
+    }
+    
+    this.healthCheckInterval = setInterval(() => {
+      this.performHealthCheck();
+    }, this.HEALTH_CHECK_INTERVAL_MS);
+    
+    console.log(`💚 [PumpFunWebSocket] Health monitoring started`);
+  }
+
+  /**
+   * PRODUCTION FIX: Perform health check
+   */
+  private performHealthCheck(): void {
+    if (!this.isMonitoring || this.monitoredTokens.size === 0) {
+      return; // No tokens being monitored
+    }
+    
+    const timeSinceLastEvent = Date.now() - this.lastEventTimestamp;
+    const minutesSilent = Math.floor(timeSinceLastEvent / 60000);
+    
+    if (timeSinceLastEvent > this.MAX_SILENCE_DURATION_MS) {
+      console.warn(`🚨 [PumpFunWebSocket] HEALTH CHECK FAILED`);
+      console.warn(`   No events received in ${minutesSilent} minutes`);
+      console.warn(`   Monitored tokens: ${this.monitoredTokens.size}`);
+      console.warn(`   This may indicate:`);
+      console.warn(`   1. WebSocket connection died`);
+      console.warn(`   2. No trading activity on monitored tokens`);
+      console.warn(`   3. RPC endpoint issues`);
+      
+      this.emit('health_warning', {
+        minutesSilent,
+        monitoredTokens: Array.from(this.monitoredTokens),
+        recommendation: 'Consider reconnecting or checking token activity'
+      });
+      
+      // Auto-reconnect if connection seems dead
+      if (timeSinceLastEvent > this.MAX_SILENCE_DURATION_MS * 2 && this.monitoredTokens.size > 0) {
+        console.error(`❌ [PumpFunWebSocket] Connection appears dead, forcing reconnect...`);
+        this.stop().then(() => {
+          // Restart with existing tokens
+          const tokensToReconnect = Array.from(this.monitoredTokens);
+          this.monitoredTokens.clear();
+          for (const token of tokensToReconnect) {
+            this.start(token).catch(err => 
+              console.error(`Failed to reconnect token ${token}:`, err)
+            );
+          }
+        });
+      }
+    } else if (minutesSilent > 1) {
+      console.log(`🟡 [PumpFunWebSocket] Health OK - Last event ${minutesSilent} minute(s) ago`);
+    }
+  }
+
+  /**
+   * PRODUCTION FIX: Stop health monitoring
+   */
+  private stopHealthMonitoring(): void {
+    if (this.healthCheckInterval) {
+      clearInterval(this.healthCheckInterval);
+      this.healthCheckInterval = null;
+      console.log(`🚫 [PumpFunWebSocket] Health monitoring stopped`);
+    }
+  }
+
+  /**
    * Stop all monitoring and close WebSocket connection
    */
   async stop(): Promise<void> {
     console.log('[PumpFunWebSocket] Stopping...');
+    
+    // PRODUCTION FIX: Stop health monitoring
+    this.stopHealthMonitoring();
     
     // Clear reconnect timer
     if (this.reconnectTimer) {

@@ -653,7 +653,7 @@ export class MarketDataProvider {
 
   /**
    * Fetch real-time token price with fallback to multiple sources
-   * FIX #9: Try all sources in PARALLEL with race condition for faster results
+   * Try all sources in PARALLEL with race condition for faster results
    */
   async fetchTokenPrice(tokenAddress: string): Promise<MarketData | null> {
     // Create promises for all sources
@@ -720,7 +720,6 @@ export class MarketDataProvider {
     console.warn('All SOL price sources failed, using fallback price');
     return 200; // Fallback price
   }
-
   /**
    * Fetch multiple token prices in parallel
    */
@@ -737,6 +736,40 @@ export class MarketDataProvider {
     await Promise.all(promises);
     return results;
   }
+
+  /**
+   * Fetch prices for all tokens with caching
+   */
+ /* async fetchAllTokenPrices(tokenAddresses: string[]): Promise<Map<string, MarketData>> {
+    const result = new Map<string, MarketData>();
+
+    const fetchPromises = tokenAddresses.map(async (address) => {
+      const data = await this.fetchTokenPrice(address);
+      if (data) {
+        result.set(address, data);
+      }
+    });
+    await Promise.all(fetchPromises);
+    return result;
+  }*/
+
+  /**
+   * Fetch prices for tokens not in cache
+   */
+ /* async fetchMissingTokenPrices(tokenAddresses: string[], cache: Map<string, MarketData>): Promise<Map<string, MarketData>> {
+    const result = new Map<string, MarketData>();
+
+    const fetchPromises = tokenAddresses.map(async (address) => {
+      if (!cache.has(address)) {
+        const data = await this.fetchTokenPrice(address);
+        if (data) {
+          result.set(address, data);
+        }
+      }
+    });
+    await Promise.all(fetchPromises);
+    return result;
+  }*/
 
   /**
    * Clear all caches

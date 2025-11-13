@@ -310,7 +310,12 @@ export class AgentController {
       const toolRequest = this.detectToolRequest(userMessage);
       
       // If tool detected but message has strategy keywords, skip tool execution and proceed to strategy parsing
-      if (toolRequest && hasStrategyKeywordsForToken) {
+      // EXCEPTION: If it's a SELL request with strategy keywords, it might be a strategy definition, not a direct sell
+      const isSellRequestWithStrategy = toolRequest?.tool === 'sell' && hasStrategyKeywordsForToken;
+      
+      if (toolRequest && hasStrategyKeywordsForToken && isSellRequestWithStrategy) {
+        console.log(` Sell request detected with strategy context - treating as strategy definition, not direct execution`);
+      } else if (toolRequest && hasStrategyKeywordsForToken) {
         console.log(` MCP tool detected but message has strategy keywords - skipping tool execution`);
       } else if (toolRequest) {
         // Skip getTokenInfo tool as it's handled by detectTokenQuery above

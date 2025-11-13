@@ -246,7 +246,7 @@ export class PaperTradingPortfolio {
     const winningTrades = profitableTrades.length;
     const losingTradesCount = losingTrades.length;
     
-    // ✅ FIX: Calculate winRate based on completed trades (buys + sells)
+    // Calculate winRate based on completed trades (buys + sells)
     // If we have NO sell trades yet, show 0% winRate (not undefined/NaN)
     // If we have sell trades, calculate based on profitable vs losing sells
     const winRate = sellTrades.length > 0 ? (winningTrades / sellTrades.length) * 100 : 0;
@@ -277,7 +277,7 @@ export class PaperTradingPortfolio {
     
     const averageLoss = losingTradesCount > 0 ? Math.abs(losingTrades.reduce((sum, t) => sum + (t.realizedPnL || 0), 0) / losingTradesCount) : 0;
 
-    // ✅ FIX: Improved Profit Factor calculation
+    // Improved Profit Factor calculation
     // Profit Factor = Total Winning $ / Total Losing $
     // If no losing trades, profit factor is infinite (cap at 999)
     // If no winning trades, profit factor is 0

@@ -102,6 +102,61 @@ export class RealTradeFeedService extends EventEmitter {
     // The PumpFunTradePoller emits 'pumpfun:real_trade' events via socket.io
   }
 
+  // Store active strategy filters per token
+  private strategyFilters: Map<string, { trigger: string; side: string }> = new Map();
+
+  /**
+   * Register strategy filter for intelligent trade filtering
+   * @param tokenAddress - Token to monitor
+   * @param trigger - Trigger type (e.g., 'mirror_buy_activity', 'mirror_sell_activity')
+   * @param side - Strategy side ('buy' or 'sell')
+   */
+  public registerStrategyFilter(tokenAddress: string, trigger: string, side: string): void {
+    const normalized = tokenAddress.toLowerCase();
+    this.strategyFilters.set(normalized, { trigger, side });
+    console.log(`🎯 [RealTradeFeedService] Registered filter for ${tokenAddress.substring(0, 8)}...`);
+    console.log(`   - Trigger: ${trigger}`);
+    console.log(`   - Side: ${side}`);
+    console.log(`   - Will only forward ${trigger.includes('buy') ? 'BUY' : 'SELL'} trades to strategy`);
+  }
+
+  /**
+   * Unregister strategy filter
+   */
+  public unregisterStrategyFilter(tokenAddress: string): void {
+    const normalized = tokenAddress.toLowerCase();
+    this.strategyFilters.delete(normalized);
+    console.log(`🗑️ [RealTradeFeedService] Removed filter for ${tokenAddress.substring(0, 8)}...`);
+  }
+
+  /**
+   * Check if trade should be forwarded based on strategy filters
+   */
+  private shouldForwardTrade(trade: RealTradeEvent): boolean {
+    const normalized = trade.tokenAddress.toLowerCase();
+    const filter = this.strategyFilters.get(normalized);
+    
+    if (!filter) {
+      // No filter = forward all trades (for UI display)
+      return true;
+    }
+    
+    // Extract what trade type the strategy is WATCHING FOR
+    // mirror_buy_activity = watching for BUYs (to then execute SELLs)
+    // mirror_sell_activity = watching for SELLs (to then execute BUYs)
+    const watchingFor = filter.trigger.includes('buy') ? 'buy' : 'sell';
+    
+    const matches = trade.type === watchingFor;
+    
+    if (!matches) {
+      console.log(`🔇 [FILTER] ${trade.type.toUpperCase()} trade FILTERED OUT (watching for ${watchingFor.toUpperCase()})`);
+    } else {
+      console.log(`✅ [FILTER] ${trade.type.toUpperCase()} trade MATCHES filter (watching for ${watchingFor.toUpperCase()})`);
+    }
+    
+    return matches;
+  }
+
   // Unified trade handler - THIS IS WHERE REAL TRADES ENTER THE SYSTEM
   private handleRealTrade(trade: RealTradeEvent): void {
     try {
@@ -119,47 +174,63 @@ export class RealTradeFeedService extends EventEmitter {
       console.log(`🔥 Signature: ${trade.signature.substring(0, 12)}...`);
       console.log(`🔥 ===========================================\n`);
       
-      // Store in recent trades
+      // Store in recent trades (all trades for historical data)
       this.addToRecentTrades(trade);
 
-      // Update statistics
+      // Update statistics (all trades)
       this.updateTradeStats(trade);
 
-      // Emit to token-specific listeners (for strategies)
-      // CRITICAL: Emit with BOTH original case AND lowercase for maximum compatibility
-      // Strategies listen with lowercase, but we want to support both
-      this.emit(`trade:${tokenAddress}`, trade);
+      // CRITICAL: Check if this trade matches strategy filters
+      const shouldForward = this.shouldForwardTrade(trade);
       
-      // Also emit lowercase version for consistent event matching
-      const lowercaseAddress = tokenAddress.toLowerCase();
-      if (lowercaseAddress !== tokenAddress) {
-        this.emit(`trade:${lowercaseAddress}`, trade);
+      if (shouldForward) {
+        // Emit to token-specific listeners (for strategies)
+        // ONLY emit if trade matches the filter
+        this.emit(`trade:${tokenAddress}`, trade);
+        
+        // Also emit lowercase version for consistent event matching
+        const lowercaseAddress = tokenAddress.toLowerCase();
+        if (lowercaseAddress !== tokenAddress) {
+          this.emit(`trade:${lowercaseAddress}`, trade);
+        }
+        
+        console.log(`📡 [RealTradeFeedService] ✅ Emitted event: trade:${tokenAddress}`);
+        console.log(`📡 [RealTradeFeedService] ✅ Emitted event: trade:${lowercaseAddress}`);
+        console.log(`📡 [RealTradeFeedService] Listeners (original): ${this.listenerCount(`trade:${tokenAddress}`)}`);
+        console.log(`📡 [RealTradeFeedService] Listeners (lowercase): ${this.listenerCount(`trade:${lowercaseAddress}`)}`);
+
+        // Emit event for strategies to consume
+        this.emit('real_trade', trade);
+        console.log(`📡 [RealTradeFeedService] ✅ Emitted global event: real_trade`);
+        
+        // Broadcast to WebSocket clients for UI updates (filtered trades only)
+        this.io.emit('pumpfun:live_trade_detected', {
+          tokenAddress,
+          type: trade.type,
+          solAmount: trade.solAmount,
+          tokenAmount: trade.tokenAmount,
+          price: trade.price,
+          trader: trade.trader,
+          signature: trade.signature,
+          timestamp: trade.timestamp,
+          isRealBlockchain: true,
+          filtered: true, // Indicates this trade passed the filter
+        });
+        console.log(`📡 [RealTradeFeedService] ✅ Broadcasted to WebSocket: pumpfun:live_trade_detected`);
+      } else {
+        console.log(`🔇 [RealTradeFeedService] Trade filtered out, NOT forwarding to strategy or UI`);
+        
+        // Still broadcast to UI but mark as filtered (for debugging)
+        this.io.emit('pumpfun:trade_filtered', {
+          tokenAddress,
+          type: trade.type,
+          solAmount: trade.solAmount,
+          reason: 'Does not match strategy trigger',
+          timestamp: trade.timestamp,
+        });
       }
-      
-      console.log(`📡 [RealTradeFeedService] Emitted event: trade:${tokenAddress}`);
-      console.log(`📡 [RealTradeFeedService] Emitted event: trade:${lowercaseAddress}`);
-      console.log(`📡 [RealTradeFeedService] Listeners (original): ${this.listenerCount(`trade:${tokenAddress}`)}`);
-      console.log(`📡 [RealTradeFeedService] Listeners (lowercase): ${this.listenerCount(`trade:${lowercaseAddress}`)}`);
 
-      // Emit event for strategies to consume
-      this.emit('real_trade', trade);
-      console.log(`📡 [RealTradeFeedService] Emitted global event: real_trade`);
-      
-      // Broadcast to WebSocket clients for UI updates
-      this.io.emit('pumpfun:live_trade_detected', {
-        tokenAddress,
-        type: trade.type,
-        solAmount: trade.solAmount,
-        tokenAmount: trade.tokenAmount,
-        price: trade.price,
-        trader: trade.trader,
-        signature: trade.signature,
-        timestamp: trade.timestamp,
-        isRealBlockchain: true,
-      });
-      console.log(`📡 [RealTradeFeedService] Broadcasted to WebSocket: pumpfun:live_trade_detected`);
-
-      console.log(`✅ [RealTradeFeedService] Trade fully processed and distributed`);
+      console.log(`✅ [RealTradeFeedService] Trade fully processed`);
     } catch (error) {
       // Don't let one bad trade kill the entire feed
       console.error('[RealTradeFeedService] ❌ Error handling trade:', error);
@@ -446,25 +517,48 @@ export class RealTradeFeedService extends EventEmitter {
       
       if (route.tokenInfo.metadata?.isPumpToken && !route.tokenInfo.metadata?.isGraduated) {
         // Use PumpFun listener for active bonding curve tokens
+        console.log(`🚀 [RealTradeFeedService] Token on bonding curve - Using PumpFun WebSocket listener`);
         if (this.webSocketListener) {
-          console.log(`� [RealTradeFeedService] Using PumpFun WebSocket listener`);
           await this.webSocketListener.start(tokenAddress);
           success = true;
         }
-      } else {
-        // Use Raydium listener for graduated or standard tokens
+      } else if (route.tokenInfo.metadata?.isPumpToken && route.tokenInfo.metadata?.isGraduated) {
+        // Graduated pump.fun token - ONLY use Raydium (graduated tokens don't trade on PumpFun anymore!)
+        console.log(`🎓 [RealTradeFeedService] Graduated Pump.fun token detected`);
+        console.log(`⚠️ [RealTradeFeedService] IMPORTANT: Graduated tokens ONLY trade on Raydium, NOT on PumpFun bonding curve!`);
+        console.log(`📌 [RealTradeFeedService] Strategy: Raydium WebSocket ONLY`);
+        
+        // ONLY use Raydium for graduated tokens
         if (this.raydiumListener) {
-          console.log(`🌊 [RealTradeFeedService] Using Raydium WebSocket listener`);
+          console.log(`🌊 [RealTradeFeedService] Starting Raydium WebSocket listener...`);
           try {
             await this.raydiumListener.start(tokenAddress);
             success = true;
+            console.log(`✅ [RealTradeFeedService] Raydium listener started successfully`);
+            console.log(`🎯 [RealTradeFeedService] RAYDIUM-ONLY MONITORING ACTIVE`);
           } catch (error) {
-            console.error(`⚠️ [RealTradeFeedService] Raydium listener failed, falling back to PumpFun`, error);
-            // Fallback to PumpFun if Raydium fails
-            if (this.webSocketListener) {
-              await this.webSocketListener.start(tokenAddress);
-              success = true;
-            }
+            console.error(`❌ [RealTradeFeedService] Raydium listener failed:`, error instanceof Error ? error.message : error);
+            console.error(`💡 [RealTradeFeedService] This means either:`);
+            console.error(`   1. Pool doesn't exist on Raydium yet`);
+            console.error(`   2. DexScreener returned wrong pool address`);
+            console.error(`   3. Network/RPC issues`);
+          }
+        }
+        
+        if (!success) {
+          console.error(`❌ [RealTradeFeedService] Failed to start Raydium listener for graduated token!`);
+          console.error(`⚠️ [RealTradeFeedService] Cannot monitor this token - please verify pool exists on Raydium`);
+        }
+      } else {
+        // Use Raydium listener for standard tokens
+        console.log(`📝 [RealTradeFeedService] Standard token - Using Raydium WebSocket listener`);
+        if (this.raydiumListener) {
+          try {
+            await this.raydiumListener.start(tokenAddress);
+            success = true;
+            console.log(`✅ [RealTradeFeedService] Raydium listener started successfully`);
+          } catch (error) {
+            console.error(`❌ [RealTradeFeedService] Raydium listener failed:`, error instanceof Error ? error.message : error);
           }
         }
       }

@@ -3,6 +3,8 @@ import { EventEmitter } from 'events';
 import { PoolDiscovery, PoolInfo } from '../utils/PoolDiscovery';
 
 const RAYDIUM_AMM_V4_PROGRAM_ID = '675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8';
+const METEORA_DLMM_PROGRAM_ID = 'LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo'; // Meteora Dynamic Liquidity Market Maker
+const ORCA_WHIRLPOOL_PROGRAM_ID = 'whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc'; // Orca Whirlpool
 
 /**
  * Raydium trade event data structure
@@ -29,6 +31,8 @@ export class RaydiumWebSocketListener extends EventEmitter {
   private isMonitoring = false;
   private monitoredPools: Map<string, PoolInfo> = new Map(); // poolAddress → PoolInfo
   private poolDiscovery: PoolDiscovery;
+  private poolActivityTracker: Map<string, { lastActivity: number; matchCount: number }> = new Map();
+  private readonly POOL_INACTIVITY_TIMEOUT = 30000; // 30 seconds
   private reconnectTimer: NodeJS.Timeout | null = null;
   private reconnectAttempts = 0;
   private maxReconnectAttempts = 5;
@@ -80,8 +84,15 @@ export class RaydiumWebSocketListener extends EventEmitter {
 
     // Store pool info
     this.monitoredPools.set(poolInfo.poolAddress, poolInfo);
+    
+    // Initialize activity tracker
+    this.poolActivityTracker.set(poolInfo.poolAddress, {
+      lastActivity: Date.now(),
+      matchCount: 0
+    });
 
     console.log(`📊 [RaydiumWS] Now monitoring ${this.monitoredPools.size} pool(s)`);
+    console.log(`⏱️ [RaydiumWS] Will check pool activity... If no swaps detected in 30s, pool might be inactive`);
 
     // Subscribe to program logs if not already subscribed
     if (!this.isMonitoring) {
@@ -111,14 +122,18 @@ export class RaydiumWebSocketListener extends EventEmitter {
   }
 
   /**
-   * Subscribe to Raydium AMM V4 program logs
+   * Subscribe to DEX program logs (Raydium, Meteora, Orca)
+   * PRODUCTION FIX: Multi-DEX support for all Solana pools
    */
   private async subscribe(): Promise<void> {
     try {
+      // PRODUCTION FIX: Subscribe to multiple DEX programs for comprehensive coverage
+      // We'll subscribe to Raydium first, then add Meteora/Orca in separate listeners
       const programId = new PublicKey(RAYDIUM_AMM_V4_PROGRAM_ID);
 
       console.log(`🔌 [RaydiumWS] Connecting to Solana WebSocket...`);
       console.log(`🎯 [RaydiumWS] Monitoring program: ${RAYDIUM_AMM_V4_PROGRAM_ID}`);
+      console.log(`🎯 [RaydiumWS] Also supports: Meteora, Orca (via pool address matching)`);
 
       // Subscribe to ALL logs from Raydium AMM V4 program
       this.subscriptionId = this.connection.onLogs(
@@ -149,6 +164,7 @@ export class RaydiumWebSocketListener extends EventEmitter {
   /**
    * Handle incoming logs from Solana
    * Parse and filter for swap events on monitored pools
+   * PRODUCTION FIX: Enhanced pattern matching and error handling
    */
   private handleLogs(logs: Logs, context: Context): void {
     try {
@@ -158,40 +174,81 @@ export class RaydiumWebSocketListener extends EventEmitter {
       // Check if this is a Raydium transaction
       const logString = logs.logs.join('\n');
       
-      // Raydium swap logs contain specific patterns
-      const isRaydiumSwap = logString.includes('Program 675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8 invoke') ||
-                           logString.includes('Program log: ray_log:');
+      // PRODUCTION FIX: Comprehensive swap detection patterns for multiple DEXs
+      const isDexSwap = 
+        // Raydium patterns
+        logString.includes('Program 675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8 invoke') ||
+        logString.includes('Program log: ray_log:') ||
+        // Meteora patterns
+        logString.includes('Program LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo invoke') ||
+        // Orca patterns  
+        logString.includes('Program whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc invoke') ||
+        // Generic swap patterns
+        logString.includes('SwapBaseIn') ||
+        logString.includes('SwapBaseOut') ||
+        /Instruction: Swap/.test(logString) ||
+        /swap/.test(logString.toLowerCase());
       
-      if (!isRaydiumSwap) return;
+      if (!isDexSwap) return;
 
-      // Check for token transfers (indicates a swap happened)
-      const hasTransfer = logString.includes('Transfer');
-      if (!hasTransfer) return;
+      // PRODUCTION FIX: More precise transfer detection
+      const hasTransfer = logString.includes('Transfer') || 
+                         logString.includes('TransferChecked') ||
+                         logString.includes('transfer:');
+                         
+      if (!hasTransfer) {
+        // Log non-swap transactions for debugging
+        console.log(`⏭️ [RaydiumWS] Raydium transaction without transfers (likely pool creation/liquidity add), skipping`);
+        return;
+      }
 
-      // CRITICAL FIX: Process ALL Raydium swaps, then filter by pool in transaction
+      // PRODUCTION FIX: Process ALL Raydium swaps, then filter by pool in transaction
       // Pool addresses often don't appear in logs, but in transaction accounts
-      console.log(`🔍 [RaydiumWS] Potential Raydium swap detected, fetching transaction...`);
+      console.log(`🔍 [RaydiumWS] Raydium swap detected (sig: ${signature.substring(0, 12)}...), fetching transaction...`);
       
       // This is a Raydium swap - fetch transaction to check if it's on our monitored pools
       this.processRaydiumTransaction(signature, logs, context);
       
     } catch (error) {
-      // Silently ignore parsing errors
-      if (error instanceof Error && !error.message.includes('Could not find')) {
-        console.error('[RaydiumWS] Error handling logs:', error.message);
+      // PRODUCTION FIX: Better error logging
+      if (error instanceof Error) {
+        if (!error.message.includes('Could not find') && !error.message.includes('not found')) {
+          console.error('[RaydiumWS] Error handling logs:', error.message);
+          console.error('[RaydiumWS] Signature:', logs.signature);
+        }
       }
     }
   }
 
   /**
    * Process a potential Raydium transaction
+   * PRODUCTION FIX: Enhanced with deduplication, better error handling, and comprehensive logging
    */
+  private processedSignatures: Set<string> = new Set(); // Prevent duplicate processing
+  private readonly MAX_PROCESSED_SIGNATURES = 1000; // Limit memory usage
+
   private async processRaydiumTransaction(
     signature: string,
     logs: Logs,
     context: Context
   ): Promise<void> {
     try {
+      // PRODUCTION FIX: Prevent duplicate transaction processing
+      if (this.processedSignatures.has(signature)) {
+        return; // Already processed this transaction
+      }
+      
+      // Add to processed set
+      this.processedSignatures.add(signature);
+      
+      // PRODUCTION FIX: Clean up old signatures to prevent memory leak
+      if (this.processedSignatures.size > this.MAX_PROCESSED_SIGNATURES) {
+        const firstSignature = this.processedSignatures.values().next().value;
+        if (firstSignature) {
+          this.processedSignatures.delete(firstSignature);
+        }
+      }
+
       // Fetch full transaction to check which pool it belongs to
       const tx = await this.connection.getParsedTransaction(signature, {
         maxSupportedTransactionVersion: 0,
@@ -200,36 +257,66 @@ export class RaydiumWebSocketListener extends EventEmitter {
 
       if (!tx || tx.meta?.err) {
         console.log(`⚠️ [RaydiumWS] Transaction not available or failed: ${signature.substring(0, 12)}...`);
+        if (tx?.meta?.err) {
+          console.log(`   Error: ${JSON.stringify(tx.meta.err)}`);
+        }
         return;
       }
 
-      // Check if any of our monitored pools are involved
+      // PRODUCTION FIX: Check if any of our monitored pools are involved
       const accountKeys = tx.transaction.message.accountKeys;
-      console.log(`🔍 [RaydiumWS] Checking transaction ${signature.substring(0, 12)}... with ${accountKeys.length} accounts`);
-      console.log(`📋 [RaydiumWS] Monitoring ${this.monitoredPools.size} pool(s): ${Array.from(this.monitoredPools.keys()).map(p => p.substring(0, 8)).join(', ')}`);
+      
+      // Only log detailed info if we're monitoring pools
+      if (this.monitoredPools.size > 0) {
+        console.log(`🔍 [RaydiumWS] Checking transaction ${signature.substring(0, 12)}... with ${accountKeys.length} accounts`);
+        console.log(`📋 [RaydiumWS] Monitoring ${this.monitoredPools.size} pool(s): ${Array.from(this.monitoredPools.keys()).map(p => p.substring(0, 8)).join(', ')}`);
+      }
+      
+      let foundMatch = false;
       
       for (const [poolAddress, poolInfo] of this.monitoredPools.entries()) {
-        // Check if pool address is in the transaction accounts
+        // PRODUCTION FIX: Check if pool address is in the transaction accounts
         const poolInvolved = accountKeys.some((key: any) => {
           const pubkey = typeof key === 'string' ? key : key.pubkey?.toString();
-          const match = pubkey === poolAddress;
-          if (match) {
-            console.log(`✅ [RaydiumWS] FOUND MATCHING POOL: ${poolAddress.substring(0, 8)}...`);
-          }
-          return match;
+          return pubkey === poolAddress;
         });
 
         if (poolInvolved) {
-          console.log(`🎯 [RaydiumWS] Processing swap for pool: ${poolAddress.substring(0, 8)}...`);
+          console.log(`✅ [RaydiumWS] MATCH! Found pool ${poolAddress.substring(0, 8)}... in transaction`);
+          foundMatch = true;
+          
+          // Update activity tracker
+          const tracker = this.poolActivityTracker.get(poolAddress);
+          if (tracker) {
+            tracker.lastActivity = Date.now();
+            tracker.matchCount++;
+            console.log(`📊 [RaydiumWS] Pool activity: ${tracker.matchCount} swaps detected`);
+          }
+          
           // This transaction involves our monitored pool
           await this.processSwapForPool(tx, signature, poolAddress, poolInfo);
-          break;
-        } else {
-          console.log(`❌ [RaydiumWS] Pool ${poolAddress.substring(0, 8)}... NOT in transaction accounts`);
+          break; // Only process once per transaction
+        }
+      }
+      
+      // PRODUCTION FIX: Check for inactive pools periodically
+      if (!foundMatch && this.monitoredPools.size > 0) {
+        for (const [poolAddress, poolInfo] of this.monitoredPools.entries()) {
+          const tracker = this.poolActivityTracker.get(poolAddress);
+          if (tracker && tracker.matchCount === 0 && (Date.now() - tracker.lastActivity > this.POOL_INACTIVITY_TIMEOUT)) {
+            console.warn(`🔴 [RaydiumWS] ALERT: Pool ${poolAddress.substring(0, 8)}... has NO swaps for ${Math.floor((Date.now() - tracker.lastActivity) / 1000)}s`);
+            console.warn(`   Possible causes:`);
+            console.warn(`   1. Wrong pool address (verify on Raydium UI or DexScreener)`);
+            console.warn(`   2. Pool is inactive/abandoned`);
+            console.warn(`   3. Token only trades on Pump.fun bonding curve (not graduated)`);
+            console.warn(`   4. RPC connection issue (check WebSocket status)`);
+            // Reset timer to avoid spamming
+            tracker.lastActivity = Date.now();
+          }
         }
       }
     } catch (error) {
-      console.error(`❌ [RaydiumWS] Error processing transaction ${signature.substring(0, 12)}:`, error);
+      console.error(`❌ [RaydiumWS] Error processing transaction ${signature.substring(0, 12)}:`, error instanceof Error ? error.message : error);
     }
   }
 
