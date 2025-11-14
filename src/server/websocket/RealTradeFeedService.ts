@@ -71,6 +71,9 @@ export class RealTradeFeedService extends EventEmitter {
   private healthCheckInterval: NodeJS.Timeout | null = null;
   private readonly CONNECTION_TIMEOUT_MS = 120000; // 2 minutes
   private connectionStale: boolean = false;
+  
+  // Token metadata cache (symbol, name, etc.)
+  private tokenMetadata: Map<string, { symbol?: string; name?: string }> = new Map();
 
   constructor(io: SocketServer, rpcUrl?: string) {
     super();
@@ -105,12 +108,6 @@ export class RealTradeFeedService extends EventEmitter {
   // Store active strategy filters per token
   private strategyFilters: Map<string, { trigger: string; side: string }> = new Map();
 
-  /**
-   * Register strategy filter for intelligent trade filtering
-   * @param tokenAddress - Token to monitor
-   * @param trigger - Trigger type (e.g., 'mirror_buy_activity', 'mirror_sell_activity')
-   * @param side - Strategy side ('buy' or 'sell')
-   */
   public registerStrategyFilter(tokenAddress: string, trigger: string, side: string): void {
     const normalized = tokenAddress.toLowerCase();
     this.strategyFilters.set(normalized, { trigger, side });
@@ -165,8 +162,12 @@ export class RealTradeFeedService extends EventEmitter {
       // Update health check timestamp
       this.updateLastTradeTimestamp();
       
+      // Get token metadata if available
+      const metadata = this.tokenMetadata.get(tokenAddress.toLowerCase());
+      const tokenDisplay = metadata?.symbol || metadata?.name || tokenAddress.substring(0, 8) + '...';
+      
       console.log(`\n🔥 ========== REAL TRADE DETECTED ==========`);
-      console.log(`🔥 Token: ${tokenAddress.substring(0, 8)}...`);
+      console.log(`🔥 Token: ${tokenDisplay}${metadata ? ` (${tokenAddress.substring(0, 8)}...)` : ''}`);
       console.log(`🔥 Type: ${trade.type.toUpperCase()}`);
       console.log(`🔥 SOL Amount: ${trade.solAmount.toFixed(6)} SOL`);
       console.log(`🔥 Token Amount: ${trade.tokenAmount.toLocaleString()} tokens`);
@@ -184,26 +185,37 @@ export class RealTradeFeedService extends EventEmitter {
       const shouldForward = this.shouldForwardTrade(trade);
       
       if (shouldForward) {
+        // Enhance trade event with metadata
+        const metadata = this.tokenMetadata.get(tokenAddress.toLowerCase());
+        const enhancedTrade = {
+          ...trade,
+          tokenSymbol: metadata?.symbol,
+          tokenName: metadata?.name
+        };
+        
         // Emit to token-specific listeners (for strategies)
         // ONLY emit if trade matches the filter
-        this.emit(`trade:${tokenAddress}`, trade);
+        this.emit(`trade:${tokenAddress}`, enhancedTrade);
         
         // Also emit lowercase version for consistent event matching
         const lowercaseAddress = tokenAddress.toLowerCase();
         if (lowercaseAddress !== tokenAddress) {
-          this.emit(`trade:${lowercaseAddress}`, trade);
+          this.emit(`trade:${lowercaseAddress}`, enhancedTrade);
         }
         
+        const tokenDisplay = metadata?.symbol || metadata?.name || tokenAddress.substring(0, 8) + '...';
         console.log(`📡 [RealTradeFeedService] ✅ Emitted event: trade:${tokenAddress}`);
+        console.log(`📡 [RealTradeFeedService] ✅ Token: ${tokenDisplay}`);
         console.log(`📡 [RealTradeFeedService] ✅ Emitted event: trade:${lowercaseAddress}`);
         console.log(`📡 [RealTradeFeedService] Listeners (original): ${this.listenerCount(`trade:${tokenAddress}`)}`);
         console.log(`📡 [RealTradeFeedService] Listeners (lowercase): ${this.listenerCount(`trade:${lowercaseAddress}`)}`);
 
         // Emit event for strategies to consume
-        this.emit('real_trade', trade);
+        this.emit('real_trade', enhancedTrade);
         console.log(`📡 [RealTradeFeedService] ✅ Emitted global event: real_trade`);
         
         // Broadcast to WebSocket clients for UI updates (filtered trades only)
+        // Include token metadata for display
         this.io.emit('pumpfun:live_trade_detected', {
           tokenAddress,
           type: trade.type,
@@ -215,8 +227,11 @@ export class RealTradeFeedService extends EventEmitter {
           timestamp: trade.timestamp,
           isRealBlockchain: true,
           filtered: true, // Indicates this trade passed the filter
+          tokenSymbol: metadata?.symbol,
+          tokenName: metadata?.name,
+          tokenDisplay: metadata?.symbol || metadata?.name || `${tokenAddress.substring(0, 8)}...`
         });
-        console.log(`📡 [RealTradeFeedService] ✅ Broadcasted to WebSocket: pumpfun:live_trade_detected`);
+        console.log(`📡 [RealTradeFeedService] ✅ Broadcasted to WebSocket with metadata: ${metadata?.symbol || metadata?.name || 'UNKNOWN'}`);
       } else {
         console.log(`🔇 [RealTradeFeedService] Trade filtered out, NOT forwarding to strategy or UI`);
         
@@ -285,7 +300,7 @@ export class RealTradeFeedService extends EventEmitter {
 
   /**
    * Setup event handlers for trade monitor
-   * CRITICAL: This connects PumpFunWebSocketListener events to our service
+   * This connects PumpFunWebSocketListener events to our service
    */
   private setupEventHandlers(): void {
     // Listen for real trades from PumpFun WebSocket Listener (bonding curve only)
@@ -475,6 +490,27 @@ export class RealTradeFeedService extends EventEmitter {
       this.healthCheckInterval = null;
     }
   }
+  /**
+   * Fetch token metadata (symbol, name) from DexScreener
+   */
+  private async fetchTokenMetadata(tokenAddress: string): Promise<{ symbol?: string; name?: string } | null> {
+    try {
+      const response = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${tokenAddress}`);
+      if (!response.ok) return null;
+      
+      const data: any = await response.json();
+      if (data?.pairs && data.pairs.length > 0) {
+        const pair = data.pairs[0];
+        return {
+          symbol: pair.baseToken?.symbol,
+          name: pair.baseToken?.name
+        };
+      }
+      return null;
+    } catch (error) {
+      return null;
+    }
+  }
 
   /**
    * Stop the service
@@ -564,6 +600,17 @@ export class RealTradeFeedService extends EventEmitter {
       }
       
       if (success) {
+        // Fetch token metadata (symbol, name)
+        try {
+          const metadata = await this.fetchTokenMetadata(tokenAddress);
+          if (metadata) {
+            this.tokenMetadata.set(tokenAddress.toLowerCase(), metadata);
+            console.log(`📋 [RealTradeFeedService] Token: ${metadata.symbol || metadata.name || 'UNKNOWN'}`);
+          }
+        } catch (error) {
+          // Non-critical, continue without metadata
+        }
+        
         // Initialize stats
         if (!this.tradeStats.has(tokenAddress)) {
           this.tradeStats.set(tokenAddress, {

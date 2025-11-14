@@ -1088,6 +1088,10 @@ export class StrategyExecutionManager {
     execution.currentContext.variables.realTradeTokenAmount = tradeEvent.tokenAmount;
     execution.currentContext.variables.realTradeSignature = tradeEvent.signature;
     
+    // Add token metadata for better logging
+    if (tradeEvent.tokenSymbol) execution.currentContext.variables.tokenSymbol = tradeEvent.tokenSymbol;
+    if (tradeEvent.tokenName) execution.currentContext.variables.tokenName = tradeEvent.tokenName;
+    
     // Set detectedVolume for mirror strategies
     // Reactive mirror strategies use this variable in calculate_sell_amount step
     execution.currentContext.variables.detectedVolume = tradeEvent.solAmount;
