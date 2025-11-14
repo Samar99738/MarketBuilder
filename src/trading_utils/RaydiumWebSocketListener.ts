@@ -67,12 +67,23 @@ export class RaydiumWebSocketListener extends EventEmitter {
       console.log(`🌊 [RaydiumWS] Starting monitoring for token: ${tokenAddress.substring(0, 8)}...`);
 
       // Find Raydium pool for this token
+      console.log(`🔍 [RaydiumWS] Calling PoolDiscovery.findPoolForToken...`);
       const discovered = await this.poolDiscovery.findPoolForToken(tokenAddress);
 
       if (!discovered) {
-        console.error(`❌ [RaydiumWS] No Raydium pool found for ${tokenAddress}`);
-        throw new Error(`No Raydium pool found for token ${tokenAddress}`);
+        console.error(`\n❌ [RaydiumWS] POOL DISCOVERY FAILED for ${tokenAddress}`);
+        console.error(`   Token: ${tokenAddress}`);
+        console.error(`   Possible reasons:`);
+        console.error(`   1. Network/firewall blocking API calls (DexScreener, Raydium)`);
+        console.error(`   2. Token doesn't have a Raydium pool (check DexScreener manually)`);
+        console.error(`   3. Token only trades on Pump.fun bonding curve (not graduated)`);
+        console.error(`   4. API rate limiting (wait and try again)\n`);
+        throw new Error(`No Raydium pool found for token ${tokenAddress}. Check logs above for details.`);
       }
+
+      console.log(`✅ [RaydiumWS] Pool discovered successfully:`);
+      console.log(`   Pool Address: ${discovered.poolAddress.substring(0, 12)}...`);
+      console.log(`   Token Mint: ${discovered.tokenMint.substring(0, 12)}...`);
 
       poolInfo = discovered;
       console.log(`✅ [RaydiumWS] Found pool: ${poolInfo.poolAddress.substring(0, 8)}...`);
@@ -191,19 +202,9 @@ export class RaydiumWebSocketListener extends EventEmitter {
       
       if (!isDexSwap) return;
 
-      // PRODUCTION FIX: More precise transfer detection
-      const hasTransfer = logString.includes('Transfer') || 
-                         logString.includes('TransferChecked') ||
-                         logString.includes('transfer:');
-                         
-      if (!hasTransfer) {
-        // Log non-swap transactions for debugging
-        console.log(`⏭️ [RaydiumWS] Raydium transaction without transfers (likely pool creation/liquidity add), skipping`);
-        return;
-      }
-
-      // PRODUCTION FIX: Process ALL Raydium swaps, then filter by pool in transaction
-      // Pool addresses often don't appear in logs, but in transaction accounts
+      // PRODUCTION FIX: Process ALL DEX swap transactions
+      // Many DEXs (Meteora, Orca, etc.) don't include "Transfer" in logs
+      // We'll validate the transaction has actual token/SOL movements when parsing
       console.log(`🔍 [RaydiumWS] Raydium swap detected (sig: ${signature.substring(0, 12)}...), fetching transaction...`);
       
       // This is a Raydium swap - fetch transaction to check if it's on our monitored pools
@@ -270,19 +271,68 @@ export class RaydiumWebSocketListener extends EventEmitter {
       if (this.monitoredPools.size > 0) {
         console.log(`🔍 [RaydiumWS] Checking transaction ${signature.substring(0, 12)}... with ${accountKeys.length} accounts`);
         console.log(`📋 [RaydiumWS] Monitoring ${this.monitoredPools.size} pool(s): ${Array.from(this.monitoredPools.keys()).map(p => p.substring(0, 8)).join(', ')}`);
+        
+        // Debug: Show first few account keys
+        const firstAccounts = accountKeys.slice(0, 5).map((key: any) => {
+          const pubkey = typeof key === 'string' ? key : key.pubkey?.toString();
+          return pubkey?.substring(0, 8) || 'unknown';
+        });
+        console.log(`🔍 [RaydiumWS] First 5 accounts: ${firstAccounts.join(', ')}...`);
       }
       
       let foundMatch = false;
       
       for (const [poolAddress, poolInfo] of this.monitoredPools.entries()) {
-        // PRODUCTION FIX: Check if pool address is in the transaction accounts
-        const poolInvolved = accountKeys.some((key: any) => {
-          const pubkey = typeof key === 'string' ? key : key.pubkey?.toString();
-          return pubkey === poolAddress;
-        });
+        // PRODUCTION FIX: Check MULTIPLE ways to match transactions
+        // 1. Check account keys (pool address)
+        // 2. Check token mint in account keys  
+        // 3. Check token mint in preTokenBalances/postTokenBalances (CRITICAL for Jupiter/aggregator swaps)
+        
+        const allAccounts = accountKeys.map((key: any) => 
+          typeof key === 'string' ? key : key.pubkey?.toString()
+        );
+        
+        // Method 1: Direct pool address match
+        const poolMatch = allAccounts.includes(poolAddress);
+        
+        // Method 2: Direct token mint match in accounts
+        const tokenMatch = allAccounts.includes(poolInfo.tokenMint);
+        
+        // Method 3: Check token mint in balance changes (WORKS FOR ALL DEX SWAPS)
+        let tokenBalanceMatch = false;
+        const targetTokenLower = poolInfo.tokenMint.toLowerCase();
+        
+        if (tx.meta) {
+          const allTokenMints = [
+            ...(tx.meta.preTokenBalances || []).map((b: any) => b.mint),
+            ...(tx.meta.postTokenBalances || []).map((b: any) => b.mint)
+          ];
+          
+          // CRITICAL: Case-insensitive comparison
+          tokenBalanceMatch = allTokenMints.some((mint: string) => 
+            mint.toLowerCase() === targetTokenLower
+          );
+          
+          // Also check if ANY token changed at all (safety net)
+          if (!tokenBalanceMatch && allTokenMints.length > 0) {
+            // If we're monitoring this pool and there ARE token transfers, log details
+            console.log(`🔍 [RaydiumWS] Checking ${signature.substring(0, 12)}... - ${allTokenMints.length} token(s) found`);
+            console.log(`   Target: ${poolInfo.tokenMint}`);
+            console.log(`   Found: ${allTokenMints.join(', ')}`);
+          }
+        }
+        
+        const poolInvolved = poolMatch || tokenMatch || tokenBalanceMatch;
+        
+        // Success logging
+        if (poolInvolved) {
+          const matchType = poolMatch ? 'pool address' : (tokenMatch ? 'token mint' : 'token balance');
+          console.log(`\n✅ [RaydiumWS] MATCH! Found ${matchType} in transaction ${signature.substring(0, 12)}...`);
+          console.log(`   Token: ${poolInfo.tokenMint.substring(0, 8)}...`);
+        }
 
         if (poolInvolved) {
-          console.log(`✅ [RaydiumWS] MATCH! Found pool ${poolAddress.substring(0, 8)}... in transaction`);
+          console.log(`✅ [RaydiumWS] MATCH! Found ${poolMatch ? 'pool' : 'token'} ${poolAddress.substring(0, 8)}... in transaction`);
           foundMatch = true;
           
           // Update activity tracker
@@ -361,12 +411,13 @@ export class RaydiumWebSocketListener extends EventEmitter {
       trade.price = trade.tokenAmount > 0 ? trade.solAmount / trade.tokenAmount : 0;
 
       console.log(`\n🌊 [RaydiumWS] RAYDIUM SWAP DETECTED:`);
-      console.log(`   Token: ${trade.tokenMint.substring(0, 8)}...`);
+      console.log(`   Token: ${trade.tokenMint.substring(0, 8)}...${trade.tokenMint.substring(trade.tokenMint.length - 4)}`);
       console.log(`   Pool: ${poolAddress.substring(0, 8)}...`);
       console.log(`   Type: ${trade.isBuy ? '🟢 BUY' : '🔴 SELL'}`);
       console.log(`   SOL: ${trade.solAmount.toFixed(4)}`);
       console.log(`   Tokens: ${trade.tokenAmount.toFixed(2)}`);
       console.log(`   Price: ${trade.price.toFixed(9)} SOL/token`);
+      console.log(`   User: ${trade.user.substring(0, 8)}...`);
       console.log(`   Signature: ${signature.substring(0, 12)}...\n`);
 
       // Emit trade event (RealTradeFeedService will catch this)
@@ -396,6 +447,7 @@ export class RaydiumWebSocketListener extends EventEmitter {
 
       let tokenAmount = 0;
       let userAccount = '';
+      let tokenIncreased = false; // Track direction of token change
 
       // Find token mint balance changes (for the specific token we're monitoring)
       for (const pre of preTokenBalances) {
@@ -411,6 +463,7 @@ export class RaydiumWebSocketListener extends EventEmitter {
             
             if (change > tokenAmount) {
               tokenAmount = change;
+              tokenIncreased = postAmount > preAmount; // TRUE if user received tokens (BUY)
               userAccount = pre.owner || post.owner || '';
             }
           }
@@ -424,21 +477,38 @@ export class RaydiumWebSocketListener extends EventEmitter {
       let maxSolChange = 0;
       let solSignerIndex = -1;
 
-      // Find the account with largest SOL change (usually the user)
+      // Find the account with largest SOL change (usually the user/signer)
+      // Exclude program accounts and focus on user wallet
       for (let i = 0; i < preBalances.length; i++) {
-        const change = Math.abs(postBalances[i] - preBalances[i]);
-        if (change > maxSolChange * 1e9) { // Compare in lamports
-          maxSolChange = change / 1e9;
+        const changeInLamports = Math.abs(postBalances[i] - preBalances[i]);
+        
+        // Skip if change is too small (likely fee payer, not trader)
+        if (changeInLamports < 1000000) continue; // < 0.001 SOL
+        
+        if (changeInLamports > maxSolChange * 1e9) {
+          maxSolChange = changeInLamports / 1e9;
           solSignerIndex = i;
         }
       }
 
       const solAmount = maxSolChange;
 
-      // Determine buy vs sell
-      // If SOL decreased, user bought tokens (BUY)
-      // If SOL increased, user sold tokens (SELL)
-      const isBuy = solSignerIndex >= 0 && postBalances[solSignerIndex] < preBalances[solSignerIndex];
+      // Determine buy vs sell using TOKEN balance changes (more reliable)
+      // If token increased (user received tokens) = BUY
+      // If token decreased (user gave away tokens) = SELL
+      const isBuy = tokenIncreased;
+      
+      // Debug buy/sell detection
+      if (solSignerIndex >= 0) {
+        const solDecreased = postBalances[solSignerIndex] < preBalances[solSignerIndex];
+        console.log(`\n💰 [RaydiumWS] BUY/SELL Detection:`);
+        console.log(`   Token Balance Change: ${tokenIncreased ? '⬆️ INCREASED' : '⬇️ DECREASED'} by ${tokenAmount.toFixed(2)} tokens`);
+        console.log(`   SOL Balance Before: ${(preBalances[solSignerIndex] / 1e9).toFixed(6)} SOL`);
+        console.log(`   SOL Balance After:  ${(postBalances[solSignerIndex] / 1e9).toFixed(6)} SOL`);
+        console.log(`   SOL Change: ${solAmount.toFixed(6)} SOL (${solDecreased ? 'decreased ⬇️' : 'increased ⬆️'})`);
+        console.log(`   Direction: ${isBuy ? '🟢 BUY (received tokens)' : '🔴 SELL (gave away tokens)'}`);
+        console.log(`   ✅ Final Determination: ${isBuy ? 'BUY' : 'SELL'}\n`);
+      }
 
       // Get user public key
       if (!userAccount && tx.transaction?.message?.accountKeys) {
