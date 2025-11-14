@@ -68,9 +68,12 @@ export class PoolDiscovery {
         this.saveToCache(tokenMint, poolInfo);
         return poolInfo;
       }
-      console.log(`[PoolDiscovery] No pool found via Raydium API`);
+      console.log(`[PoolDiscovery] No pool found via Raydium API - trying next method`);
     } catch (error) {
       console.warn(`⚠️ [PoolDiscovery] Raydium API search failed:`, error instanceof Error ? error.message : error);
+      if (error instanceof Error && error.message.includes('fetch')) {
+        console.warn(`   💡 Network issue detected - check firewall/proxy settings`);
+      }
     }
 
     // Method 2: Try DexScreener API (most reliable)
@@ -85,9 +88,12 @@ export class PoolDiscovery {
         this.saveToCache(tokenMint, poolInfo);
         return poolInfo;
       }
-      console.log(`[PoolDiscovery] No pool found via DexScreener`);
+      console.log(`[PoolDiscovery] No pool found via DexScreener - trying on-chain search`);
     } catch (error) {
-      console.warn(`⚠️ [PoolDiscovery] DexScreener search failed:`, error instanceof Error ? error.message : error);
+      console.error(`❌ [PoolDiscovery] DexScreener search FAILED:`, error instanceof Error ? error.message : error);
+      if (error instanceof Error) {
+        console.error(`   Error stack:`, error.stack?.substring(0, 200));
+      }
     }
 
     // Method 3: On-chain search (requires special RPC - only as last resort)
@@ -260,6 +266,10 @@ export class PoolDiscovery {
       console.log(`   Liquidity: $${pool.liquidity?.usd?.toLocaleString() || '0'}`);
       console.log(`   24h Volume: $${pool.volume?.h24?.toLocaleString() || '0'}`);
       console.log(`   24h Txns: ${pool.txns?.h24?.buys || 0} buys, ${pool.txns?.h24?.sells || 0} sells`);
+      console.log(`   🔍 DEBUG Pool Structure:`);
+      console.log(`      Base Token: ${pool.baseToken.address}`);
+      console.log(`      Quote Token: ${pool.quoteToken.address}`);
+      console.log(`      Target Token: ${tokenMint}`);
       
       // PRODUCTION FIX: Warn if pool has no recent activity
       const has24hActivity = (pool.txns?.h24?.buys || 0) + (pool.txns?.h24?.sells || 0) > 0;
@@ -268,13 +278,22 @@ export class PoolDiscovery {
         console.warn(`   This pool might be inactive or abandoned. Trades may not be detected.`);
       }
       
+      // CRITICAL FIX: Determine baseMint and quoteMint correctly
+      // The token we're monitoring should be the baseMint, SOL should be quoteMint
+      const isBaseToken = pool.baseToken.address === tokenMint;
+      const baseMint = isBaseToken ? pool.baseToken.address : pool.quoteToken.address;
+      const quoteMint = isBaseToken ? pool.quoteToken.address : pool.baseToken.address;
+      
+      console.log(`   ✅ Determined: baseMint=${baseMint.substring(0, 8)}... (target token)`);
+      console.log(`   ✅ Determined: quoteMint=${quoteMint.substring(0, 8)}... (${quoteMint === NATIVE_SOL_MINT ? 'SOL' : 'other'})`);
+      
       return {
         poolAddress: pool.pairAddress,
         tokenMint: tokenMint,
-        baseMint: pool.baseToken.address === tokenMint ? pool.baseToken.address : pool.quoteToken.address,
-        quoteMint: pool.baseToken.address === NATIVE_SOL_MINT ? pool.baseToken.address : pool.quoteToken.address,
-        baseDecimals: pool.baseToken.address === tokenMint ? (pool.info?.baseDecimals || 6) : (pool.info?.quoteDecimals || 9),
-        quoteDecimals: pool.baseToken.address === NATIVE_SOL_MINT ? 9 : (pool.quoteToken.address === NATIVE_SOL_MINT ? 9 : 6)
+        baseMint: baseMint,
+        quoteMint: quoteMint,
+        baseDecimals: isBaseToken ? (pool.info?.baseDecimals || 6) : (pool.info?.quoteDecimals || 6),
+        quoteDecimals: quoteMint === NATIVE_SOL_MINT ? 9 : 6
       };
     } catch (error) {
       console.error(`❌ [PoolDiscovery] DexScreener search failed:`, error instanceof Error ? error.message : error);
