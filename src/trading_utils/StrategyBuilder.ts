@@ -2,6 +2,9 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { awsLogger } from '../aws/logger';
 import { TradingProvider, TradingProviderFactory, TradingResult, PriceResult } from './TradingProvider';
+import { ENV_CONFIG } from '../config/environment';
+import { timeStamp } from 'console';
+import { marketDataProvider } from './paper-trading';
 
 // Lazy-loaded imports for backward compatibility
 let tokenUtilsModule: any = null;
@@ -14,7 +17,7 @@ async function getTokenUtils() {
   }
   return tokenUtilsModule;
 }
-  
+
 
 // Production-ready risk management and validation
 export interface RiskLimits {
@@ -175,7 +178,7 @@ export interface StrategyExecutionResult {
 
 // Strategy builder class
 export class StrategyBuilder {
-  
+
   static generateStopLossStrategyTemplate(
     id: string,
     name: string,
@@ -259,7 +262,7 @@ export class StrategyBuilder {
       isProduction: false
     };
   }
- 
+
   static generateGridStrategyTemplate(
     id: string,
     name: string,
@@ -283,11 +286,11 @@ export class StrategyBuilder {
     const steps: StrategyStep[] = [];
     for (let i = 0; i < gridLevels; i++) {
       const price = lowerPrice + i * priceStep;
-      const buyStepId = `buy_${i+1}`;
-      const sellStepId = `sell_${i+1}`;
+      const buyStepId = `buy_${i + 1}`;
+      const sellStepId = `sell_${i + 1}`;
       // Wait for price to drop to grid level, then buy
       steps.push({
-        id: `wait_buy_${i+1}`,
+        id: `wait_buy_${i + 1}`,
         type: 'waitPriceBelow',
         targetPrice: price,
         description: `Wait for price to drop to ${price}`,
@@ -297,12 +300,12 @@ export class StrategyBuilder {
         id: buyStepId,
         type: 'buy',
         amountInSol: amountPerLevel,
-        description: `Buy ${amountPerLevel} SOL at grid level ${i+1} (${price})`,
+        description: `Buy ${amountPerLevel} SOL at grid level ${i + 1} (${price})`,
         onSuccess: sellStepId
       } as BuyStep);
       // Wait for price to rise to grid level, then sell
       steps.push({
-        id: `wait_sell_${i+1}`,
+        id: `wait_sell_${i + 1}`,
         type: 'waitPriceAbove',
         targetPrice: price,
         description: `Wait for price to rise to ${price}`,
@@ -312,8 +315,8 @@ export class StrategyBuilder {
         id: sellStepId,
         type: 'sell',
         amountToSell: -1,
-        description: `Sell all tokens at grid level ${i+1} (${price})`,
-        onSuccess: i < gridLevels - 1 ? `wait_buy_${i+2}` : undefined
+        description: `Sell all tokens at grid level ${i + 1} (${price})`,
+        onSuccess: i < gridLevels - 1 ? `wait_buy_${i + 2}` : undefined
       } as SellStep);
     }
     const now = Date.now();
@@ -360,7 +363,7 @@ export class StrategyBuilder {
   constructor(tradingProvider?: TradingProvider) {
     // Use provided trading provider or get from factory
     this.tradingProvider = tradingProvider || TradingProviderFactory.getInstance();
-  // StrategyBuilder initialized
+    // StrategyBuilder initialized
   }
 
   static generateDCAStrategyTemplate(
@@ -376,14 +379,14 @@ export class StrategyBuilder {
     }
     const steps: StrategyStep[] = [];
     for (let i = 0; i < buyAmountsSol.length; i++) {
-      const buyStepId = `buy_${i+1}`;
-      const waitStepId = `wait_${i+1}`;
+      const buyStepId = `buy_${i + 1}`;
+      const waitStepId = `wait_${i + 1}`;
       // Buy step
       steps.push({
         id: buyStepId,
         type: 'buy',
         amountInSol: buyAmountsSol[i],
-        description: `Buy ${buyAmountsSol[i]} SOL (DCA step ${i+1})`,
+        description: `Buy ${buyAmountsSol[i]} SOL (DCA step ${i + 1})`,
         onSuccess: i < buyAmountsSol.length - 1 ? waitStepId : undefined,
         onFailure: undefined
       } as BuyStep);
@@ -393,8 +396,8 @@ export class StrategyBuilder {
           id: waitStepId,
           type: 'wait',
           durationMs: buyIntervalsMs[i],
-          description: `Wait ${buyIntervalsMs[i]/1000}s before next buy`,
-          onSuccess: `buy_${i+2}`,
+          description: `Wait ${buyIntervalsMs[i] / 1000}s before next buy`,
+          onSuccess: `buy_${i + 2}`,
           onFailure: undefined
         } as WaitStep);
       }
@@ -441,7 +444,7 @@ export class StrategyBuilder {
   // Set or change trading provider
   setTradingProvider(provider: TradingProvider): void {
     this.tradingProvider = provider;
-  // Trading provider changed
+    // Trading provider changed
   }
 
   // Get current trading provider info
@@ -611,7 +614,7 @@ export class StrategyBuilder {
 
   // Execute a strategy
   async executeStrategy(
-    strategyId: string, 
+    strategyId: string,
     existingContext?: StrategyContext,
     abortSignal?: AbortSignal  // Accept AbortSignal to enable immediate cancellation
   ): Promise<StrategyExecutionResult> {
@@ -673,7 +676,7 @@ export class StrategyBuilder {
       startTime: Date.now(),
       logs: [],
     };
-    
+
     // DON'T reset currentStepId if context exists!
     // The currentStepId should continue from where it left off (e.g. wait_for_trigger, detect_activity)
     // Only set startStepId if this is a BRAND NEW context (first execution)
@@ -692,7 +695,7 @@ export class StrategyBuilder {
 
       while (context.currentStepId) {
         loopCount++;
-        
+
         // Safety check for infinite loops
         if (loopCount > maxLoops) {
           console.error(`❌ [StrategyBuilder] Infinite loop detected! Exceeded ${maxLoops} iterations`);
@@ -753,7 +756,7 @@ export class StrategyBuilder {
             console.log(`🔥 [StrategyBuilder] Step ${step.id} REQUESTED SUBSCRIPTION - RETURNING EARLY for immediate activation`);
             context.variables._subscriptionReady = true;
             context.variables._needsSubscription = false; // Clear request flag
-            
+
             // Advance to next step BEFORE returning!
             if (result.success && step.onSuccess) {
               context.currentStepId = step.onSuccess;
@@ -762,7 +765,7 @@ export class StrategyBuilder {
               context.currentStepId = step.onFailure;
               console.log(`🔥 [StrategyBuilder] Advanced to failure step: ${context.currentStepId}`);
             }
-            
+
             // Return immediately with partial completion
             context.logs.push(`Strategy paused for subscription setup after ${loopCount} iterations`);
             return {
@@ -789,8 +792,7 @@ export class StrategyBuilder {
           }
 
           context.logs.push(
-            `Step ${step.id} completed: ${
-              result.success ? "SUCCESS" : "FAILURE"
+            `Step ${step.id} completed: ${result.success ? "SUCCESS" : "FAILURE"
             }, next: ${context.currentStepId || 'NONE'}`
           );
         } catch (stepError) {
@@ -805,7 +807,7 @@ export class StrategyBuilder {
             throw stepError;
           }
         }
-        
+
         console.log(`🔍 [DEBUG StrategyBuilder] End of loop iteration ${loopCount}, next step: ${context.currentStepId || 'NONE'}, stop flag: ${context.variables._shouldStop}`);
       }
 
@@ -852,17 +854,17 @@ export class StrategyBuilder {
         try {
           // Get actual amount - either from step config or from context (dynamic)
           let actualAmountInSol: number;
-          
+
           if (buyStep.amountInSol === -1) {
             // Dynamic amount from context (like mirror strategies)
             actualAmountInSol = context.variables?.solAmountToBuy;
-            
+
             if (!actualAmountInSol || actualAmountInSol <= 0) {
               throw new Error(
                 "Dynamic buy amount not set in context. Expected context.variables.solAmountToBuy to be set by previous step."
               );
             }
-            
+
             console.log(`[BUY STEP] Using dynamic amount from context: ${actualAmountInSol.toFixed(6)} SOL`);
           } else {
             // Static amount from step configuration
@@ -877,7 +879,7 @@ export class StrategyBuilder {
             if (buyStep.amountInSol <= 0) {
               throw new Error("Buy amount must be greater than 0 SOL.");
             }
-            
+
             actualAmountInSol = buyStep.amountInSol;
             console.log(`[BUY STEP] Using static amount from config: ${actualAmountInSol.toFixed(6)} SOL`);
           }
@@ -910,10 +912,10 @@ export class StrategyBuilder {
 
           // To check for Dynamic amount
           let actualSellAmount = sellStep.amountToSell;
-          if (sellStep.amountToSell === -1 && context.variables.tokenAmountToSell){
+          if (sellStep.amountToSell === -1 && context.variables.tokenAmountToSell) {
             actualSellAmount = context.variables.tokenAmountToSell;
             // Using dynamic sell amount from context
-          }else {
+          } else {
             // Using static sell amount
           }
 
@@ -934,11 +936,10 @@ export class StrategyBuilder {
           return {
             success: true,
             data: { signature, amountToSell: actualSellAmount },
-            message: `Sell order executed: ${signature} (Amount: ${
-              sellStep.amountToSell === -1
+            message: `Sell order executed: ${signature} (Amount: ${sellStep.amountToSell === -1
                 ? "ALL tokens"
                 : sellStep.amountToSell + " tokens"
-            })`,
+              })`,
           };
         } catch (error) {
           // Sell Failed
@@ -993,21 +994,44 @@ export class StrategyBuilder {
         }
 
       case "getPrice":
-        try {
-          const priceData = await this.tradingProvider.getTokenPriceUSD();
-          context.variables.currentPrice = priceData.price;
-          context.variables.priceSource = priceData.source;
-          return {
-            success: true,
-            data: { price: priceData.price, source: priceData.source },
-            message: `Current token price: $${priceData.price} (from ${priceData.source})`,
-          };
-        } catch (error) {
-          return {
-            success: false,
-            message: `Get price failed: ${error}`,
-          };
+        // Use MarketDataProvider which returns CORRECT price types
+        const marketData = await marketDataProvider.fetchTokenPrice(
+          context.variables.tokenAddress || ENV_CONFIG.TOKEN_ADDRESS
+        );
+
+        if (!marketData) {
+          throw new Error('Failed to fetch market data');
         }
+
+        // CRITICAL: Return TOKEN/SOL price for calculations
+        return {
+          success: true,
+          data: {
+            price: marketData.price,           // TOKEN/SOL (for calculations)
+            priceUSD: marketData.priceUSD,     // TOKEN/USD (for display) 
+            solPrice: marketData.solPrice,     // SOL/USD (for USD conversions) 
+            source: marketData.source,
+            timestamp: marketData.timestamp
+          },
+          message: `Token price: ${marketData.price.toFixed(10)} SOL ($${marketData.priceUSD?.toFixed(6)})`
+        };
+
+      // case "getPrice":
+      //   try {
+      //     const priceData = await this.tradingProvider.getTokenPriceUSD();
+      //     context.variables.currentPrice = priceData.price;
+      //     context.variables.priceSource = priceData.source;
+      //     return {
+      //       success: true,
+      //       data: { price: priceData.price, source: priceData.source },
+      //       message: `Current token price: $${priceData.price} (from ${priceData.source})`,
+      //     };
+      //   } catch (error) {
+      //     return {
+      //       success: false,
+      //       message: `Get price failed: ${error}`,
+      //     };
+      //   }
 
       case "getJupiterPrice":
         try {
@@ -1055,7 +1079,7 @@ export class StrategyBuilder {
           const checkInterval = 1000; // Check every 1 second
           const totalDuration = waitStep.durationMs;
           let elapsed = 0;
-          
+
           while (elapsed < totalDuration) {
             // Check if stop flag is set
             if (context.variables._shouldStop === true) {
@@ -1065,13 +1089,13 @@ export class StrategyBuilder {
                 message: `Wait interrupted by stop flag after ${elapsed}ms`,
               };
             }
-            
+
             // Wait for the shorter of: remaining time or check interval
             const waitTime = Math.min(checkInterval, totalDuration - elapsed);
             await new Promise((resolve) => setTimeout(resolve, waitTime));
             elapsed += waitTime;
           }
-          
+
           return {
             success: true,
             message: `Waited for ${waitStep.durationMs}ms`,
@@ -1290,8 +1314,8 @@ export class StrategyBuilder {
 
     strategy.updatedAt = Date.now();
     fs.writeFileSync(savePath, JSON.stringify(strategy, null, 2));
-    
-  // Strategy saved
+
+    // Strategy saved
     awsLogger.info(`Strategy saved`, { strategyId, metadata: { filePath: savePath } });
   }
 
@@ -1306,16 +1330,16 @@ export class StrategyBuilder {
     try {
       const data = fs.readFileSync(filePath, 'utf8');
       const strategy: Strategy = JSON.parse(data);
-      
+
       // Validate loaded strategy structure
       if (!strategy.id || !strategy.name || !Array.isArray(strategy.steps)) {
         throw new Error('Invalid strategy file format');
       }
 
       this.strategies.set(strategy.id, strategy);
-    // Strategy loaded
+      // Strategy loaded
       awsLogger.info(`Strategy loaded`, { strategyId: strategy.id, metadata: { filePath } });
-      
+
       return strategy;
     } catch (error) {
       throw new Error(`Failed to load strategy from ${filePath}: ${error}`);
@@ -1333,7 +1357,7 @@ export class StrategyBuilder {
 
     strategy.riskLimits = { ...strategy.riskLimits, ...riskLimits };
     strategy.updatedAt = Date.now();
-    
+
     awsLogger.info(`Risk limits updated`, { strategyId, metadata: { riskLimits } });
   }
 
@@ -1350,22 +1374,22 @@ export class StrategyBuilder {
     if (tradeResult.success) {
       strategy.metrics.successfulTrades++;
     }
-    
+
     strategy.metrics.totalPnL += tradeResult.pnl;
     strategy.metrics.winRate = (strategy.metrics.successfulTrades / strategy.metrics.totalTrades) * 100;
-    strategy.metrics.averageTradeTime = 
-      (strategy.metrics.averageTradeTime * (strategy.metrics.totalTrades - 1) + tradeResult.tradeTime) / 
+    strategy.metrics.averageTradeTime =
+      (strategy.metrics.averageTradeTime * (strategy.metrics.totalTrades - 1) + tradeResult.tradeTime) /
       strategy.metrics.totalTrades;
-    
+
     if (tradeResult.pnl < 0 && Math.abs(tradeResult.pnl) > strategy.metrics.maxDrawdown) {
       strategy.metrics.maxDrawdown = Math.abs(tradeResult.pnl);
     }
-    
+
     strategy.metrics.lastExecuted = Date.now();
     strategy.updatedAt = Date.now();
 
-    awsLogger.info(`Strategy metrics updated`, { 
-      strategyId, 
+    awsLogger.info(`Strategy metrics updated`, {
+      strategyId,
       metadata: {
         totalTrades: strategy.metrics.totalTrades,
         winRate: strategy.metrics.winRate,
@@ -1429,15 +1453,15 @@ export class StrategyBuilder {
     // Validate before promoting
     const errors = this.validateStrategy(strategyId);
     const criticalErrors = errors.filter(e => e.severity === 'error');
-    
+
     if (criticalErrors.length > 0) {
       throw new Error(`Cannot promote strategy to production. Critical errors found: ${criticalErrors.map(e => e.message).join(', ')}`);
     }
 
     strategy.isProduction = true;
     strategy.updatedAt = Date.now();
-    
-  // Strategy promoted to PRODUCTION
+
+    // Strategy promoted to PRODUCTION
     awsLogger.info(`Strategy promoted to production`, { strategyId });
   }
 
@@ -1454,8 +1478,8 @@ export class StrategyBuilder {
         stoppedCount++;
       }
     }
-    
-  // EMERGENCY STOP: strategies stopped
+
+    // EMERGENCY STOP: strategies stopped
     awsLogger.error(`Emergency stop activated`, { metadata: { stoppedStrategies: stoppedCount } });
   }
 }

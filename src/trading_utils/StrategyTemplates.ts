@@ -91,7 +91,7 @@ export function createDCAStrategy(config: {
       condition: 'custom' as const,
       customCondition: (context: any) => {
         console.log(`🔍 [DEBUG DCA check_investment_limit] Entry - stop flag: ${context.variables._shouldStop}`);
-        
+
         //  Check stop flag FIRST before any other logic
         if (context.variables._shouldStop === true) {
           console.log(`🛑 [DCA STRATEGY] Stop requested - exiting after ${context.variables.executionCount || 0} executions`);
@@ -102,7 +102,7 @@ export function createDCAStrategy(config: {
         if (!context.variables.executionCount) {
           context.variables.executionCount = 0;
           context.variables.totalInvested = 0;
-          
+
           // Initialize tokenAddress from config
           if (config.tokenAddress) {
             context.variables.tokenAddress = config.tokenAddress;
@@ -117,18 +117,18 @@ export function createDCAStrategy(config: {
           } else if (config.buyAmountSOL) {
             context.variables.buyAmountSOL = config.buyAmountSOL;
             const countMsg = config.buyCount ? `${config.buyCount} times` : 'until manually stopped';
-           // console.log(`DCA BUY Strategy initialized: Will buy ${config.buyAmountSOL} SOL ${countMsg}`);
+            // console.log(`DCA BUY Strategy initialized: Will buy ${config.buyAmountSOL} SOL ${countMsg}`);
           }
 
           //  ADD THIS VALIDATION LOGGING
-         /* console.log(`[check_investment_limit] Context variables initialized:`, {
-            executionCount: context.variables.executionCount,
-            buyAmountSOL: context.variables.buyAmountSOL,
-            sellAmountSOL: context.variables.sellAmountSOL,
-            totalInvested: context.variables.totalInvested,
-            configBuyAmount: config.buyAmountSOL,
-            configSellAmount: config.sellAmountSOL
-          });*/
+          /* console.log(`[check_investment_limit] Context variables initialized:`, {
+             executionCount: context.variables.executionCount,
+             buyAmountSOL: context.variables.buyAmountSOL,
+             sellAmountSOL: context.variables.sellAmountSOL,
+             totalInvested: context.variables.totalInvested,
+             configBuyAmount: config.buyAmountSOL,
+             configSellAmount: config.sellAmountSOL
+           });*/
         }
 
         // ===== Only check count if it's defined =====
@@ -136,14 +136,14 @@ export function createDCAStrategy(config: {
         if (count !== undefined && count !== null) {
           const canContinue = context.variables.executionCount < count;
           const action = config.side === 'sell' ? 'sells' : 'buys';
-          
+
           console.log(`🔍 [DCA LIMIT CHECK] Execution ${context.variables.executionCount}/${count} ${action}`, {
             executionCount: context.variables.executionCount,
             limit: count,
             canContinue,
             willStop: !canContinue
           });
-          
+
           if (!canContinue) {
             console.log(`✅ [DCA COMPLETE] Reached limit: ${context.variables.executionCount} of ${count} ${action} completed`);
           }
@@ -156,7 +156,7 @@ export function createDCAStrategy(config: {
           const currentInvested = context.variables.totalInvested || 0;
           const canContinue = currentInvested < config.maxTotalInvestmentSOL;
           if (!canContinue) {
-           // console.log(` DCA BUY Strategy completed: Reached max investment of ${config.maxTotalInvestmentSOL} SOL`);
+            // console.log(` DCA BUY Strategy completed: Reached max investment of ${config.maxTotalInvestmentSOL} SOL`);
           }
           return canContinue;
         }
@@ -190,7 +190,7 @@ export function createDCAStrategy(config: {
           const sellAmountSOL = config.sellAmountSOL;
 
           if (!currentPrice || !sellAmountSOL) {
-           // console.log(` DCA SELL: Missing price or sell amount`);
+            // console.log(` DCA SELL: Missing price or sell amount`);
             return false;
           }
 
@@ -361,7 +361,7 @@ export function createDCASellStrategy(config: {
         if (config.sellCount !== undefined && config.sellCount !== null) {
           const canContinue = context.variables.executionCount < config.sellCount;
           if (!canContinue) {
-          //  console.log(`DCA SELL Strategy completed: Executed ${context.variables.executionCount} of ${config.sellCount} planned sells`);
+            //  console.log(`DCA SELL Strategy completed: Executed ${context.variables.executionCount} of ${config.sellCount} planned sells`);
           }
           return canContinue;
         }
@@ -447,7 +447,7 @@ export function createDCASellStrategy(config: {
       type: 'condition' as const,
       condition: 'custom' as const,
       customCondition: () => {
-       // console.log(`DCA SELL Strategy Complete`);
+        // console.log(`DCA SELL Strategy Complete`);
         return false; // Returning false stops the strategy
       },
       description: 'DCA SELL strategy completed successfully'
@@ -621,7 +621,7 @@ export function createStopLossTakeProfitStrategy(config: {
         context.variables.entryPrice = entryPrice;
         context.variables.stopLossPrice = entryPrice * (1 - config.stopLossPercentage / 100);
         context.variables.takeProfitPrice = entryPrice * (1 + config.takeProfitPercentage / 100);
-       // console.log(`Exit targets set: SL=${context.variables.stopLossPrice}, TP=${context.variables.takeProfitPrice}`);
+        // console.log(`Exit targets set: SL=${context.variables.stopLossPrice}, TP=${context.variables.takeProfitPrice}`);
         return true;
       },
       onSuccess: 'monitor_position',
@@ -734,7 +734,7 @@ export function createMomentumStrategy(config: {
   const timeframeMin = config.timeframeMinutes || config.timeframe || 1;
   const sellThreshold = config.sellThreshold || -3; // Default: sell on -3% reversal
   const sellAmount = config.sellAmountTokens || -1; // Default: -1 means sell ALL tokens
-  
+
   const strategy = strategyBuilder.createStrategy(
     config.id,
     config.description || `Momentum Trading Strategy`,
@@ -835,15 +835,15 @@ export function createMomentumStrategy(config: {
           console.log(`🟢 [MOMENTUM BUY TRIGGER] Momentum ${momentum.toFixed(2)}% >= ${config.momentumThreshold}%`);
           context.variables.shouldSell = false; // Explicitly set to false
           return true;
-        } 
-        
+        }
+
         // SELL condition: momentum drops below sell threshold and has position
         if (context.variables.hasPosition && momentum <= sellThreshold) {
           console.log(`🔴 [MOMENTUM SELL TRIGGER] Momentum ${momentum.toFixed(2)}% <= ${sellThreshold}%, HasPosition: ${context.variables.hasPosition}`);
           context.variables.shouldSell = true;
           return true;
         }
-        
+
         // No trigger - reset baseline and continue monitoring
         console.log(`⏸️ [MOMENTUM] No trigger - resetting baseline. HasPosition: ${context.variables.hasPosition}`);
         context.variables.initialPrice = currentPrice;
@@ -893,11 +893,11 @@ export function createMomentumStrategy(config: {
       customCondition: (context: any) => {
         // Store the configured sell amount in context for PaperTradingProvider to use
         const configuredSellAmount = context.variables.sellAmount || -1;
-        
+
         // If sellAmount is -1 (sell all), keep it as -1
         // If sellAmount is a positive number, store it
         context.variables.tokenAmountToSell = configuredSellAmount;
-        
+
         const sellDescription = configuredSellAmount === -1 ? 'ALL tokens' : `${configuredSellAmount} tokens`;
         console.log(`📤 [PREPARE SELL] Configured to sell: ${sellDescription}`);
         return true;
@@ -920,7 +920,7 @@ export function createMomentumStrategy(config: {
       customCondition: (context: any) => {
         const sellAmount = context.variables.tokenAmountToSell;
         const sellDescription = sellAmount === -1 ? 'ALL tokens' : `${sellAmount} tokens`;
-        
+
         context.variables.hasPosition = false;
         context.variables.shouldSell = false;
         context.variables.executionCount = (context.variables.executionCount || 0) + 1;
@@ -992,9 +992,9 @@ export function createCustomStrategy(config: {
   buyAmountSOL?: number; // e.g., 0.001 SOL
 }): Strategy {
   // Check if this is a contrarian volatility strategy
-  if (config.strategyType === 'contrarian_volatility' || 
-      (config.sellTriggerPercentage && config.buyTriggerPercentage && 
-       config.sellTriggerTimeframeMinutes && config.buyTriggerTimeframeMinutes)) {
+  if (config.strategyType === 'contrarian_volatility' ||
+    (config.sellTriggerPercentage && config.buyTriggerPercentage &&
+      config.sellTriggerTimeframeMinutes && config.buyTriggerTimeframeMinutes)) {
     console.log(`🎯 [createCustomStrategy] Creating CONTRARIAN VOLATILITY strategy`);
     return createContrarianVolatilityStrategy({
       id: config.id,
@@ -1008,7 +1008,7 @@ export function createCustomStrategy(config: {
       buyAmountSOL: config.buyAmountSOL || 0.001
     });
   }
-  
+
   // Check if this is a reactive/mirror strategy
   if (config.strategyType === 'reactive' && config.trigger && config.trigger.includes('mirror') && config.side) {
     console.log(`🎯 [createCustomStrategy] Creating REACTIVE mirror strategy with config:`, {
@@ -1027,10 +1027,10 @@ export function createCustomStrategy(config: {
       sellAmount: config.sellAmountTokens // Pass user-specified token amount
     });
   }
-  
+
   // Check if this is a price-based conditional strategy
-  if (config.strategyType === 'price_based_conditional' || 
-      (config.priceDropPercentage && config.priceRecoveryPercentage)) {
+  if (config.strategyType === 'price_based_conditional' ||
+    (config.priceDropPercentage && config.priceRecoveryPercentage)) {
     console.log(`🎯 [createCustomStrategy] Creating PRICE-BASED CONDITIONAL strategy`);
     return createPriceBasedConditionalStrategy({
       id: config.id,
@@ -1042,7 +1042,7 @@ export function createCustomStrategy(config: {
       initialBuyAmount: config.initialBuyAmount || 0.1
     });
   }
-  
+
   // Default custom strategy behavior
   const strategy = strategyBuilder.createStrategy(
     config.id,
@@ -1063,12 +1063,12 @@ export function createCustomStrategy(config: {
       type: 'condition' as const,
       condition: 'custom' as const,
       customCondition: (context: any) => {
-       // console.log(`Custom Strategy initialized: ${config.description}`);
+        // console.log(`Custom Strategy initialized: ${config.description}`);
         if (config.components && config.components.length > 0) {
           //console.log(`Automated components:`, config.components);
         }
         if (config.manualSteps && config.manualSteps.length > 0) {
-         // console.log(`Manual steps required:`, config.manualSteps);
+          // console.log(`Manual steps required:`, config.manualSteps);
         }
         context.variables.customStrategyActive = true;
         return true;
@@ -1100,7 +1100,7 @@ export function createCustomStrategy(config: {
         context.variables.entryPrice = entryPrice;
         context.variables.stopLossPrice = entryPrice * 0.8;
         context.variables.takeProfitPrice = entryPrice * 1.5;
-       // console.log(`Exit targets set: SL=${context.variables.stopLossPrice}, TP=${context.variables.takeProfitPrice}`);
+        // console.log(`Exit targets set: SL=${context.variables.stopLossPrice}, TP=${context.variables.takeProfitPrice}`);
         return true;
       },
       onSuccess: 'monitor_position',
@@ -1170,7 +1170,7 @@ export function createCustomStrategy(config: {
       condition: 'custom' as const,
       customCondition: (context: any) => {
         const exitReason = context.variables.exitReason;
-       // console.log(`Custom Strategy completed: ${exitReason}`);
+        // console.log(`Custom Strategy completed: ${exitReason}`);
         return true;
       },
       description: 'Strategy execution completed'
@@ -1180,7 +1180,7 @@ export function createCustomStrategy(config: {
       type: 'condition' as const,
       condition: 'custom' as const,
       customCondition: () => {
-       // console.log(`Custom Strategy failed: Could not execute initial buy`);
+        // console.log(`Custom Strategy failed: Could not execute initial buy`);
         return true;
       },
       description: 'Strategy failed to initialize'
@@ -1245,7 +1245,7 @@ export function createPriceBasedConditionalStrategy(config: {
       onFailure: 'strategy_failed',
       description: `Execute initial buy of ${config.initialBuyAmount} SOL`
     },
-    
+
     // Step 2: Store entry price and token amount
     {
       id: 'store_entry_price',
@@ -1258,11 +1258,11 @@ export function createPriceBasedConditionalStrategy(config: {
           context.variables.entryPrice = buyResult.data.executionPrice || buyResult.data.price;
           context.variables.initialTokenAmount = buyResult.data.tokensReceived || buyResult.data.amountTokens;
           context.variables.originalBuyAmount = config.initialBuyAmount;
-          
+
           // Calculate sell trigger price (e.g., 20% drop)
           const dropMultiplier = 1 - (config.priceDropPercentage / 100);
           context.variables.sellTriggerPrice = context.variables.entryPrice * dropMultiplier;
-          
+
           console.log(`📊 [Price Conditional] Entry recorded:`, {
             entryPrice: context.variables.entryPrice,
             initialTokenAmount: context.variables.initialTokenAmount,
@@ -1277,7 +1277,7 @@ export function createPriceBasedConditionalStrategy(config: {
       onFailure: 'strategy_failed',
       description: 'Store entry price and calculate sell trigger'
     },
-    
+
     // Step 3: Monitor price for drop
     {
       id: 'monitor_for_price_drop',
@@ -1286,7 +1286,7 @@ export function createPriceBasedConditionalStrategy(config: {
       onFailure: 'wait_before_price_check',
       description: 'Monitor current price for drop trigger'
     },
-    
+
     // Step 4: Check if price dropped enough to trigger sell
     {
       id: 'check_price_drop',
@@ -1302,14 +1302,14 @@ export function createPriceBasedConditionalStrategy(config: {
         const currentPrice = context.stepResults.monitor_for_price_drop?.data?.price;
         const sellTriggerPrice = context.variables.sellTriggerPrice;
         const entryPrice = context.variables.entryPrice;
-        
+
         if (!currentPrice || !sellTriggerPrice) {
           console.log(`⚠️ [Price Conditional] Missing price data`);
           return false;
         }
 
         const priceDropPercent = ((entryPrice - currentPrice) / entryPrice) * 100;
-        
+
         console.log(`📉 [Price Conditional] Price check:`, {
           currentPrice: currentPrice.toFixed(9),
           sellTriggerPrice: sellTriggerPrice.toFixed(9),
@@ -1330,7 +1330,7 @@ export function createPriceBasedConditionalStrategy(config: {
       onFailure: 'wait_before_price_check',
       description: `Check if price dropped ${config.priceDropPercentage}%`
     },
-    
+
     // Step 5: Sell ALL position
     {
       id: 'sell_all_position',
@@ -1340,7 +1340,7 @@ export function createPriceBasedConditionalStrategy(config: {
       onFailure: 'retry_sell',
       description: `Sell 100% of position`
     },
-    
+
     // Step 6: Retry sell if it failed
     {
       id: 'retry_sell',
@@ -1349,7 +1349,7 @@ export function createPriceBasedConditionalStrategy(config: {
       onSuccess: 'sell_all_position',
       description: 'Wait before retrying sell'
     },
-    
+
     // Step 7: Wait a bit before monitoring for recovery
     {
       id: 'wait_for_recovery',
@@ -1358,7 +1358,7 @@ export function createPriceBasedConditionalStrategy(config: {
       onSuccess: 'monitor_for_recovery',
       description: 'Wait before monitoring for price recovery'
     },
-    
+
     // Step 8: Monitor price for recovery
     {
       id: 'monitor_for_recovery',
@@ -1367,7 +1367,7 @@ export function createPriceBasedConditionalStrategy(config: {
       onFailure: 'wait_before_recovery_check',
       description: 'Monitor price for recovery'
     },
-    
+
     // Step 9: Check if price recovered enough to trigger rebuy
     {
       id: 'check_price_recovery',
@@ -1382,7 +1382,7 @@ export function createPriceBasedConditionalStrategy(config: {
 
         const currentPrice = context.stepResults.monitor_for_recovery?.data?.price;
         const sellPrice = context.variables.sellPrice;
-        
+
         if (!currentPrice || !sellPrice) {
           console.log(`⚠️ [Price Conditional] Missing price data for recovery check`);
           return false;
@@ -1391,9 +1391,9 @@ export function createPriceBasedConditionalStrategy(config: {
         // Calculate recovery trigger price (e.g., 10% above sell price)
         const recoveryMultiplier = 1 + (config.priceRecoveryPercentage / 100);
         const rebuyTriggerPrice = sellPrice * recoveryMultiplier;
-        
+
         const recoveryPercent = ((currentPrice - sellPrice) / sellPrice) * 100;
-        
+
         console.log(`📈 [Price Conditional] Recovery check:`, {
           currentPrice: currentPrice.toFixed(9),
           sellPrice: sellPrice.toFixed(9),
@@ -1405,13 +1405,13 @@ export function createPriceBasedConditionalStrategy(config: {
         // Trigger rebuy if price recovered by specified percentage or more
         if (currentPrice >= rebuyTriggerPrice) {
           console.log(`🟢 [Price Conditional] REBUY TRIGGER! Price recovered ${recoveryPercent.toFixed(2)}%`);
-          
+
           // Calculate rebuy amount (e.g., 50% of original position)
           const rebuyAmount = context.variables.originalBuyAmount * (config.rebuyPercentage / 100);
           context.variables.rebuyAmount = rebuyAmount;
-          
+
           console.log(`💰 [Price Conditional] Rebuy amount: ${rebuyAmount} SOL (${config.rebuyPercentage}% of original ${context.variables.originalBuyAmount} SOL)`);
-          
+
           return true;
         }
         return false;
@@ -1420,7 +1420,7 @@ export function createPriceBasedConditionalStrategy(config: {
       onFailure: 'wait_before_recovery_check',
       description: `Check if price recovered ${config.priceRecoveryPercentage}%`
     },
-    
+
     // Step 10: Rebuy specified percentage of original position
     {
       id: 'rebuy_position',
@@ -1430,7 +1430,7 @@ export function createPriceBasedConditionalStrategy(config: {
       onFailure: 'retry_rebuy',
       description: `Rebuy ${config.rebuyPercentage}% of original position`
     },
-    
+
     // Step 11: Retry rebuy if it failed
     {
       id: 'retry_rebuy',
@@ -1439,7 +1439,7 @@ export function createPriceBasedConditionalStrategy(config: {
       onSuccess: 'rebuy_position',
       description: 'Wait before retrying rebuy'
     },
-    
+
     // Step 12: Update entry price after rebuy
     {
       id: 'update_entry_after_rebuy',
@@ -1450,11 +1450,11 @@ export function createPriceBasedConditionalStrategy(config: {
         if (rebuyResult && rebuyResult.data) {
           const newEntryPrice = rebuyResult.data.executionPrice || rebuyResult.data.price;
           context.variables.entryPrice = newEntryPrice;
-          
+
           // Update sell trigger for next cycle
           const dropMultiplier = 1 - (config.priceDropPercentage / 100);
           context.variables.sellTriggerPrice = newEntryPrice * dropMultiplier;
-          
+
           console.log(`📊 [Price Conditional] New entry after rebuy:`, {
             newEntryPrice: newEntryPrice,
             newSellTriggerPrice: context.variables.sellTriggerPrice
@@ -1467,7 +1467,7 @@ export function createPriceBasedConditionalStrategy(config: {
       onFailure: 'strategy_failed',
       description: 'Update entry price and restart monitoring cycle'
     },
-    
+
     // Helper steps
     {
       id: 'wait_before_price_check',
@@ -1530,20 +1530,25 @@ export function createReactiveMirrorStrategy(config: {
     sellAmount: config.sellAmount,
     trigger: config.trigger
   });
-  
+
   const isSellStrategy = config.side === 'sell';
   const actionName = isSellStrategy ? 'SELL' : 'BUY';
-  
+
   // Determine what blockchain activity we're WATCHING FOR (not what action we take)
   // Example: "mirror_buy_activity" means we WATCH FOR buys, then execute sells
   // Example: "mirror_sell_activity" means we WATCH FOR sells, then execute buys
   const triggerAction = config.trigger.includes('buy') ? 'buy' : 'sell';
-  
+
   console.log(`🎯 [TRIGGER SETUP] User wants to ${config.side.toUpperCase()} when they detect ${triggerAction.toUpperCase()} activity`);
   console.log(`🎯 [TRIGGER SETUP] We will watch for "${triggerAction}" trades and execute "${config.side}" orders`);
   
-  const buyAmount = config.buyAmount || 0.005; // Default to 0.005 SOL if not specified
-  
+  // Validate user provided amount - NO DEFAULTS!
+  if (!isSellStrategy && (!config.buyAmount || config.buyAmount <= 0)) {
+    throw new Error('buyAmount is required and must be greater than 0. Please specify the SOL amount to buy.');
+  }
+
+  const buyAmount = config.buyAmount;
+
   const strategy = strategyBuilder.createStrategy(
     config.id,
     `Reactive Mirror ${actionName} Strategy`,
@@ -1570,15 +1575,15 @@ export function createReactiveMirrorStrategy(config: {
         console.log(`📈 Action: ${config.side.toUpperCase()}`);
         console.log(`🔔 Trigger: ${config.trigger}`);
         console.log(`📦 Sizing: ${config.sizingRule || 'mirror_volume'}`);
-        
+
         context.variables.tokenAddress = config.tokenAddress;
         context.variables.reactiveActive = true;
         context.variables.executionCount = 0;
         context.variables.simulatedAmount = 0.001; // Start with small test amount
-        
+
         // FLAG: Request subscription to start IMMEDIATELY
         context.variables._needsSubscription = true;
-        
+
         return true;
       },
       onSuccess: 'wait_for_trigger',
@@ -1617,7 +1622,7 @@ export function createReactiveMirrorStrategy(config: {
           console.log(`🛑 [REACTIVE] Strategy stopped by user`);
           return false;
         }
-        
+
         // REAL BLOCKCHAIN MONITORING
         // Check if we received a real trade event from RealTradeFeedService
         if (context.variables.realTradeDetected === true) {
@@ -1626,21 +1631,27 @@ export function createReactiveMirrorStrategy(config: {
           const tradeSolAmount = context.variables.realTradeSolAmount;
           const tradeTokenAmount = context.variables.realTradeTokenAmount; // Token amount from trade
           const tradeSignature = context.variables.realTradeSignature;
+
+          // Get token symbol for better readability
+          const tokenSymbol = context.variables.tokenSymbol || context.variables.tokenName || 'UNKNOWN';
+          const tokenAddr = context.variables.tokenAddress;
           
           console.log(`\n🔔 ========== REAL ${tradeType.toUpperCase()} DETECTED! ==========`);
-          console.log(`🔔 Token: ${context.variables.tokenAddress.substring(0, 8)}...`);
+          console.log(`🔔 Token: ${tokenSymbol} (${tokenAddr.substring(0, 8)}...)`);
           console.log(`🔔 SOL: ${tradeSolAmount.toFixed(4)} | Tokens: ${tradeTokenAmount ? tradeTokenAmount.toLocaleString() : 'N/A'}`);
+          console.log(`🔔 Price: ${tradePrice ? tradePrice.toFixed(10) : 'N/A'} SOL/token`);
+          console.log(`🔔 Signature: ${tradeSignature?.substring(0, 12)}...`);
           console.log(`🔔 ================================================\n`);
-          
+
           // Check if this trade matches our trigger
           console.log(`🎯 [TRIGGER CHECK] Detected trade type: "${tradeType}", Looking for: "${triggerAction}"`);
           console.log(`🎯 [TRIGGER CHECK] Strategy side: "${config.side}", Sizing: "${config.sizingRule}"`);
           const shouldTrigger = (triggerAction === tradeType);
           console.log(`🎯 [TRIGGER CHECK] Match result: ${shouldTrigger ? '✅ MATCHED' : '❌ NO MATCH'}`);
-          
+
           if (shouldTrigger) {
             console.log(`✅ TRIGGER MATCHED! Executing ${config.side} order\n`);
-            
+
             // CRITICAL: Set detectedVolume based on what strategy needs
             // - SELL strategies (watching buys) need volume in SOL (how much SOL was spent buying)
             // - BUY strategies (watching sells) need volume in TOKENS (how many tokens were sold)
@@ -1651,7 +1662,7 @@ export function createReactiveMirrorStrategy(config: {
               // Watching SELLs → Need TOKEN amount to mirror
               context.variables.detectedVolume = tradeTokenAmount;
             }
-            
+
             // Calculate mirror amount based on sizing rule (legacy support)
             if (config.sizingRule === 'mirror_volume' || config.sizingRule === 'mirror_buy_volume' || config.sizingRule === 'mirror_sell_volume') {
               if (isSellStrategy) {
@@ -1669,17 +1680,17 @@ export function createReactiveMirrorStrategy(config: {
               // Fixed amount
               context.variables.solAmountToBuy = config.buyAmount || 0.005;
             }
-            
+
             // Store the trigger price and signature for reference
             context.variables.triggerPrice = tradePrice;
             context.variables.triggerSignature = tradeSignature;
-            
+
             // Reset the flag so we don't re-trigger
-          //  context.variables.realTradeDetected = false;
-            
+            //  context.variables.realTradeDetected = false;
+
             return true; // Trigger action
           }
-          
+
           //  Don't blindly reset flag
           // Only reset if we're certain no new trade arrived (wrong type)
           if (!shouldTrigger) {
@@ -1688,7 +1699,7 @@ export function createReactiveMirrorStrategy(config: {
             console.log(`ℹ️ [IGNORED TRADE] ${tradeType.toUpperCase()} trade ignored - looking for ${triggerAction.toUpperCase()} trades`);
           }
         }
-        
+
         return false; // No trigger yet, keep waiting
       },
       onSuccess: isSellStrategy ? 'calculate_sell_amount' : 'calculate_buy_amount',
@@ -1706,14 +1717,14 @@ export function createReactiveMirrorStrategy(config: {
       condition: 'custom' as const,
       customCondition: (context: any) => {
         const tokenAddress = context.variables.tokenAddress;
-        
+
         // Priority 1: Check if user explicitly specified token supply
         if (config.supply && config.supply > 0) {
           context.variables.tokenBalance = config.supply;
           console.log(`📊 [GET POSITION] Using user-specified supply: ${config.supply.toLocaleString()} tokens`);
           return true;
         }
-        
+
         // Priority 2: Try to get actual position from paper trading state
         if (context.paperTradingState?.portfolio?.positions) {
           const position = context.paperTradingState.portfolio.positions.find(
@@ -1725,22 +1736,20 @@ export function createReactiveMirrorStrategy(config: {
             return true;
           }
         }
-        
-        // Priority 3: No position found - emit warning for SELL strategies
-        console.warn(`⚠️ [GET POSITION] No position found for token ${tokenAddress.substring(0, 8)}...`);
-        console.warn(`⚠️ [GET POSITION] SELL strategies require either:`);
-        console.warn(`⚠️   1. User-specified 'supply' parameter in strategy config`);
-        console.warn(`⚠️   2. Existing token position in portfolio`);
-        console.warn(`⚠️ [GET POSITION] Using fallback: 100,000 tokens (may not reflect reality)`);
-        
-        // Fallback: Use default but warn user
-        context.variables.tokenBalance = 100000;
-        return true;
+
+        // Priority 3: No position found - FAIL for SELL strategies (no dangerous fallbacks!)
+        console.error(`❌ [GET POSITION] No position found for token ${tokenAddress.substring(0, 8)}...`);
+        console.error(`❌ [GET POSITION] SELL strategies require either:`);
+        console.error(`❌   1. User-specified 'supply' parameter in strategy config`);
+        console.error(`❌   2. Existing token position in portfolio`);
+        console.error(`❌ [GET POSITION] Cannot execute SELL without tokens!`);
+
+        throw new Error(`No token position available. Cannot sell tokens you don't own. Please specify 'supply' in config or ensure position exists.`);
       },
       onSuccess: 'fetch_token_price',
       description: 'Get current token position size with proper validation'
     });
-    
+
     // Step 1a: Fetch token price from market
     steps.push({
       id: 'fetch_token_price',
@@ -1749,91 +1758,133 @@ export function createReactiveMirrorStrategy(config: {
       onFailure: 'validate_token_price', // Continue even if fetch fails
       description: 'Fetch current token price from market data'
     });
-    
+
     // Step 1b: Validate we got TOKEN price (not SOL price) for calculation  
     steps.push({
       id: 'validate_token_price',
       type: 'condition' as const,
       condition: 'custom' as const,
       customCondition: (context: any) => {
-        // IMPORTANT: Get TOKEN price in SOL, NOT SOL price in USD!
-        // The getPrice step was returning SOL/USD (186.57) instead of TOKEN/SOL (0.000147)
-        // This caused the calculation to be: 0.288 SOL / 186.57 = 0.0015 tokens = 0 = 1 token default
-        
-        // For now, use the last step's result if available, otherwise use fallback
-        // The price will be fetched by the execution layer when needed
-        const stepResult = context.stepResults?.get_current_price?.data;
-        
-        if (stepResult && typeof stepResult === 'object' && 'price' in stepResult) {
-          const priceData = stepResult as { price?: number; source?: string };
-          if (priceData.price && priceData.price > 0 && priceData.price < 1) {
-            // Valid TOKEN price (should be small, less than 1 SOL)
-            context.variables.currentPrice = priceData.price;
-            context.variables.priceSource = priceData.source || 'Unknown';
-            console.log(`💰 [PRICE OK] Using TOKEN price: ${priceData.price.toFixed(10)} SOL per token (source: ${priceData.source})`);
-            return true;
-          } else if (priceData.price && priceData.price > 1) {
-            // This is SOL/USD price, not TOKEN/SOL - WRONG!
-            console.error(`❌ [PRICE ERROR] Got SOL/USD price (${priceData.price}) instead of TOKEN/SOL price! Using fallback.`);
+        // CRITICAL: Validate we have TOKEN/SOL price for calculations
+        const stepResult = context.stepResults?.fetch_token_price?.data;
+
+        if (!stepResult || !stepResult.price) {
+          console.error(`❌ [PRICE ERROR] No price data returned from fetch`);
+          throw new Error('Failed to fetch token price. Cannot execute trade without market price.');
+        }
+
+        const price = stepResult.price;
+        const priceUSD = stepResult.priceUSD;
+        const solPrice = stepResult.solPrice;
+
+        // CRITICAL: Validate we have TOKEN/SOL price (should be < 1 for most tokens)
+        if (price >= 1) {
+          console.error(`❌ [PRICE ERROR] Invalid price: ${price}`);
+          console.error(`❌ This looks like SOL/USD or TOKEN/USD, not TOKEN/SOL!`);
+          console.error(`❌ TOKEN/SOL prices should always be < 1`);
+
+          // Try to derive TOKEN/SOL from TOKEN/USD and SOL/USD
+          if (priceUSD && solPrice && priceUSD > 0 && solPrice > 0) {
+            const tokenPriceInSOL = priceUSD / solPrice;
+            if (tokenPriceInSOL > 0 && tokenPriceInSOL < 1) {
+              context.variables.currentPrice = tokenPriceInSOL;
+              context.variables.priceSource = `${stepResult.source} (derived)`;
+              console.log(`✅ [DERIVED] Calculated TOKEN/SOL: ${tokenPriceInSOL.toFixed(10)}`);
+              console.log(`✅ From: $${priceUSD} TOKEN/USD / $${solPrice} SOL/USD`);
+              return true;
+            }
           }
+
+          throw new Error(`Invalid price type: ${price}. Expected TOKEN/SOL price < 1.`);
         }
-        
-        // Fallback: Use last known price ONLY if recent
-        if (context.variables.lastKnownPrice && 
-            context.variables.lastKnownPrice < 1 &&
-            context.variables.lastPriceTimestamp &&
-            (Date.now() - context.variables.lastPriceTimestamp) < 60000) {
-          // Price must be <1 minute old
-          
-          context.variables.currentPrice = context.variables.lastKnownPrice;
-          const ageSeconds = Math.floor((Date.now() - context.variables.lastPriceTimestamp) / 1000);
-          console.log(`💰 [PRICE FALLBACK] Using recent price (${ageSeconds}s old): ${context.variables.lastKnownPrice.toFixed(10)} SOL per token`);
-          return true;
-        } else {
-          // NO SAFE FALLBACK - FAIL THE EXECUTION
-          const errorMsg = context.variables.lastKnownPrice 
-            ? `Price data too stale (>${Math.floor((Date.now() - context.variables.lastPriceTimestamp) / 1000)}s old)`
-            : 'No valid price data available';
-          
-          console.error(`❌ [PRICE ERROR] ${errorMsg}`);
-          console.error(`❌ [PRICE ERROR] Cannot execute trade without current market price`);
-          
-          // Store error for user visibility
-          context.variables.executionError = errorMsg;
-          context.variables.executionSafelyStopped = true;
-          
-          return false; // STOP EXECUTION - DO NOT TRADE WITHOUT PRICE
-        }
+
+        // Valid TOKEN/SOL price
+        context.variables.currentPrice = price;
+        context.variables.priceSource = stepResult.source;
+        console.log(`✅ [PRICE OK] TOKEN/SOL: ${price.toFixed(10)} from ${stepResult.source}`);
+
+        // Store additional price info for display
+        if (priceUSD) context.variables.tokenPriceUSD = priceUSD;
+        if (solPrice) context.variables.solPriceUSD = solPrice;
+
+        return true;
       },
       onSuccess: 'calculate_sell_amount',
       description: 'Validate TOKEN price in SOL (not SOL/USD price!)'
-  });
-    
+    });
+
     // Step 2: Calculate EXACT sell amount based on mirror_buy_volume sizing rule
     steps.push({
       id: 'calculate_sell_amount',
       type: 'condition' as const,
       condition: 'custom' as const,
-      customCondition: (context: any) => {
+      customCondition: async (context: any) => {
         const sizingRule = config.sizingRule || 'mirror_buy_volume';
         const detectedVolumeSOL = context.variables.detectedVolume || 0.001;
-        const currentPosition = context.variables.tokenBalance || 100000;
-        
+        let currentPosition = context.variables.tokenBalance;
+
+        // PAPER TRADING FIX: Check if user specified initial virtual position
+        if ((!currentPosition || currentPosition <= 0) && context.strategyConfig?.initialTokenBalance) {
+          const initialBalance = parseFloat(context.strategyConfig.initialTokenBalance);
+          if (initialBalance > 0) {
+            console.log(`💰 [PAPER TRADING] Using initial virtual position: ${initialBalance.toLocaleString()} tokens`);
+            currentPosition = initialBalance;
+            context.variables.tokenBalance = initialBalance;
+            
+            // Add to paper trading portfolio if available
+            if (context.paperTradingProvider) {
+              try {
+                await context.paperTradingProvider.simulateInitialPosition(
+                  context.strategyConfig.tokenAddress,
+                  initialBalance
+                );
+                console.log(`✅ [PAPER TRADING] Virtual position added to portfolio`);
+              } catch (err) {
+                console.warn(`⚠️ [PAPER TRADING] Could not add to portfolio:`, err);
+              }
+            }
+          }
+        }
+
+        if (!currentPosition || currentPosition <= 0){
+          console.warn(`⚠️ [POSITION WARNING] No token position found for reactive SELL strategy`);
+          console.warn(`⚠️ This is a REACTIVE SELL strategy - it mirrors BUY activity but has no tokens to sell.`);
+          console.warn(`⚠️ SOLUTION: Either:`);
+          console.warn(`⚠️   1. Specify 'initialTokenBalance' in strategy config (for paper trading)`);
+          console.warn(`⚠️   2. Start with a BUY strategy first to accumulate tokens`);
+          console.warn(`⚠️   3. Manually add initial position via paper trading`);
+          console.warn(`⚠️   4. Use a hybrid strategy (buy first, then reactive sells)`);
+          console.warn(`⚠️ Skipping this execution - will retry on next trigger\n`);
+          
+          // Mark this execution as skipped, not failed
+          context.variables._executionSkipped = true;
+          context.variables._skipReason = 'No tokens to sell';
+          
+          // CRITICAL: Reset the trade detected flag so we can catch the NEXT trade
+          context.variables.realTradeDetected = false;
+          
+          // Don't throw error - just return false to skip this execution
+          // Strategy will LOOP BACK to monitoring and try again on next buy
+          return false;
+        }
+
+        console.log(`[POSITION] Current holding: ${currentPosition.toLocaleString()} tokens`);
+
         console.log(`\n====== CALCULATE SELL AMOUNT DEBUG ======`);
         console.log(`📌 Config sizingRule: ${sizingRule}`);
         console.log(`📌 Detected volume: ${detectedVolumeSOL.toFixed(6)} SOL`);
         console.log(`📌 Current position: ${currentPosition.toLocaleString()} tokens`);
-        
+
         // Get current token price - PRIORITIZE FRESH PRICE from fetch_token_price step
         // Order of priority: fresh fetch > cached variable > fallback
         let currentPrice = context.stepResults?.fetch_token_price?.data?.price ||
-                          context.variables?.currentPrice ||
-                          context.variables?.lastKnownPrice;
-        
+          context.variables?.currentPrice ||
+          context.variables?.lastKnownPrice;
+
         console.log(`📌 Price from fetch_token_price (FRESH): ${context.stepResults?.fetch_token_price?.data?.price}`);
         console.log(`📌 Price from variables (CACHED): ${context.variables?.currentPrice}`);
         console.log(`📌 Final price used: ${currentPrice}`);
-        
+
         // Warn if there's a significant price mismatch between fresh and cached
         const freshPrice = context.stepResults?.fetch_token_price?.data?.price;
         const cachedPrice = context.variables?.currentPrice;
@@ -1843,19 +1894,20 @@ export function createReactiveMirrorStrategy(config: {
             console.warn(`⚠️ [PRICE MISMATCH] Fresh price differs from cached by ${priceDiff.toFixed(2)}%! (Fresh: ${freshPrice}, Cached: ${cachedPrice})`);
           }
         }
-        
-        // If still no price, log warning and use safe fallback
+
+        // Validate price - NO FALLBACKS!
         if (!currentPrice || currentPrice <= 0) {
-          console.warn(`⚠️ [PRICE ERROR] Could not fetch price, using fallback`);
-          currentPrice = 0.0001; // Reasonable fallback for typical tokens
-        } else if (currentPrice > 1) {
-          // This is likely SOL/USD price, not TOKEN/SOL - reject it!
-          console.error(`❌ [PRICE ERROR] Got invalid price ${currentPrice} (likely SOL/USD instead of TOKEN/SOL), using fallback`);
-          currentPrice = 0.0001;
+          console.error(`❌ [PRICE ERROR] Could not fetch valid price`);
+          throw new Error('Cannot execute trade without current market price. Price fetch failed.');
         }
         
+        if (currentPrice >= 1) {
+          console.error(`❌ [PRICE ERROR] Got invalid price ${currentPrice} (likely SOL/USD or TOKEN/USD, not TOKEN/SOL)`);
+          throw new Error(`Invalid price type: ${currentPrice}. Expected TOKEN/SOL price < 1.`);
+        }
+
         let calculatedAmount: number;
-        
+
         // CHECK IF USER SPECIFIED A FIXED SELL AMOUNT
         if (config.sellAmount && config.sellAmount > 0) {
           // USER SPECIFIED EXACT TOKEN AMOUNT - override any calculation
@@ -1866,7 +1918,7 @@ export function createReactiveMirrorStrategy(config: {
           // EXACT 1:1 MIRRORING: Sell the exact same token amount that buyers are buying
           // Convert detected SOL volume to token amount using current price
           calculatedAmount = detectedVolumeSOL / currentPrice;
-          
+
           console.log(`🎯 [MIRROR MODE] Exact 1:1 mirroring enabled`);
           console.log(`📊 [MIRROR MODE] Detected buy: ${detectedVolumeSOL.toFixed(6)} SOL`);
           console.log(`📊 [MIRROR MODE] Current price: ${currentPrice.toFixed(10)} SOL per token`);
@@ -1876,25 +1928,25 @@ export function createReactiveMirrorStrategy(config: {
           // Percentage of position (5% default)
           const sellPercentage = 0.05;
           calculatedAmount = currentPosition * sellPercentage;
-          
+
           console.log(`📊 [PERCENTAGE MODE] Selling ${sellPercentage * 100}% of position: ${calculatedAmount.toFixed(0)} tokens`);
         } else if (sizingRule === 'fixed_amount') {
           // Fixed token amount (from config or default)
           calculatedAmount = config.sellAmount || (config.buyAmount ? (config.buyAmount / currentPrice) : 5000);
-          
+
           console.log(`📊 [FIXED MODE] Selling fixed amount: ${calculatedAmount.toFixed(0)} tokens`);
         } else {
           // Fallback: use mirror mode
           calculatedAmount = detectedVolumeSOL / currentPrice;
           console.log(`⚠️ [DEFAULT] Unknown sizingRule '${sizingRule}', using mirror mode`);
         }
-        
+
         // Ensure we don't sell more than we have
         calculatedAmount = Math.min(calculatedAmount, currentPosition);
-        
+
         // Calculate final amount
         const finalAmount = Math.floor(calculatedAmount);
-        
+
         // Set amount based on mode
         if (config.sellAmount && config.sellAmount > 0) {
           // User specified amount - use it exactly
@@ -1905,21 +1957,22 @@ export function createReactiveMirrorStrategy(config: {
           context.variables.tokenAmountToSell = Math.max(1, finalAmount);
           console.log(`🔢 [CALCULATED] Using calculated amount: ${finalAmount.toLocaleString()} tokens from ${detectedVolumeSOL.toFixed(6)} SOL at price ${currentPrice.toFixed(10)}`);
         }
-        
+
         console.log(`✅ [SIZING FINAL] Will sell ${context.variables.tokenAmountToSell.toLocaleString()} tokens (${((context.variables.tokenAmountToSell / currentPosition) * 100).toFixed(2)}% of position)`);
-        
+
         // Store price for next iteration if fetch failed
         if (context.stepResults?.get_current_price?.data?.price) {
           context.variables.lastKnownPrice = context.stepResults.get_current_price.data.price;
           context.variables.lastPriceTimestamp = Date.now();
         }
-        
+
         return true;
       },
       onSuccess: 'execute_mirror_sell',
+      onFailure: 'wait_for_trigger', // Loop back to monitoring if no tokens available
       description: `Calculate sell amount using ${config.sizingRule || 'mirror_buy_volume'} sizing rule`
     });
-    
+
     steps.push({
       id: 'execute_mirror_sell',
       type: 'sell',
@@ -1936,7 +1989,7 @@ export function createReactiveMirrorStrategy(config: {
         context.variables.executionCount = (context.variables.executionCount || 0) + 1;
         const lastSellAmount = context.stepResults.execute_mirror_sell?.data?.tokenAmount || 0;
         console.log(`💰 [MIRROR SELL #${context.variables.executionCount}] Sold ${lastSellAmount} tokens (dynamically calculated)`);
-       
+
         // Reset the flag AFTER Successful execution
         context.variables.realTradeDetected = false;
         console.log(`[FLAG RESET] Trade Processed successfully, ready for next event`);
@@ -1955,60 +2008,61 @@ export function createReactiveMirrorStrategy(config: {
       onFailure: 'validate_token_price_buy', // Continue even if fetch fails
       description: 'Fetch current token price from market data'
     });
-    
+
     // Step 1b: Validate we got TOKEN price (not SOL price)
     steps.push({
       id: 'validate_token_price_buy',
       type: 'condition' as const,
       condition: 'custom' as const,
       customCondition: (context: any) => {
-        // Validate TOKEN price in SOL, NOT SOL/USD price!
+        // CRITICAL: Validate we have TOKEN/SOL price for calculations
         const stepResult = context.stepResults?.fetch_token_price_buy?.data;
-        
-        if (stepResult && typeof stepResult === 'object' && 'price' in stepResult) {
-          const priceData = stepResult as { price?: number; source?: string };
-          if (priceData.price && priceData.price > 0 && priceData.price < 1) {
-            // Valid TOKEN price (should be small, less than 1 SOL)
-            context.variables.currentPrice = priceData.price;
-            context.variables.priceSource = priceData.source || 'Unknown';
-            console.log(`💰 [BUY PRICE OK] Using TOKEN price: ${priceData.price.toFixed(10)} SOL per token (source: ${priceData.source})`);
-            return true;
-          } else if (priceData.price && priceData.price > 1) {
-            console.error(`❌ [BUY PRICE ERROR] Got SOL/USD price (${priceData.price}) instead of TOKEN/SOL price! Using fallback.`);
+
+        if (!stepResult || !stepResult.price) {
+          console.error(`❌ [BUY PRICE ERROR] No price data returned from fetch`);
+          throw new Error('Failed to fetch token price. Cannot execute trade without market price.');
+        }
+
+        const price = stepResult.price;
+        const priceUSD = stepResult.priceUSD;
+        const solPrice = stepResult.solPrice;
+
+        // CRITICAL: Validate we have TOKEN/SOL price (should be < 1 for most tokens)
+        if (price >= 1) {
+          console.error(`❌ [BUY PRICE ERROR] Invalid price: ${price}`);
+          console.error(`❌ This looks like SOL/USD or TOKEN/USD, not TOKEN/SOL!`);
+          console.error(`❌ TOKEN/SOL prices should always be < 1`);
+
+          // Try to derive TOKEN/SOL from TOKEN/USD and SOL/USD
+          if (priceUSD && solPrice && priceUSD > 0 && solPrice > 0) {
+            const tokenPriceInSOL = priceUSD / solPrice;
+            if (tokenPriceInSOL > 0 && tokenPriceInSOL < 1) {
+              context.variables.currentPrice = tokenPriceInSOL;
+              context.variables.priceSource = `${stepResult.source} (derived)`;
+              console.log(`✅ [BUY DERIVED] Calculated TOKEN/SOL: ${tokenPriceInSOL.toFixed(10)}`);
+              console.log(`✅ From: $${priceUSD} TOKEN/USD / $${solPrice} SOL/USD`);
+              return true;
+            }
           }
+
+          throw new Error(`Invalid price type: ${price}. Expected TOKEN/SOL price < 1.`);
         }
-        
-        // Fallback: Use last known price ONLY if recent
-        if (context.variables.lastKnownPrice && 
-            context.variables.lastKnownPrice < 1 &&
-            context.variables.lastPriceTimestamp &&
-            (Date.now() - context.variables.lastPriceTimestamp) < 60000) {
-          // Price must be <1 minute old
-          
-          context.variables.currentPrice = context.variables.lastKnownPrice;
-          const ageSeconds = Math.floor((Date.now() - context.variables.lastPriceTimestamp) / 1000);
-          console.log(`💰 [BUY PRICE FALLBACK] Using recent price (${ageSeconds}s old): ${context.variables.lastKnownPrice.toFixed(10)} SOL per token`);
-          return true;
-        } else {
-          // NO SAFE FALLBACK - FAIL THE EXECUTION
-          const errorMsg = context.variables.lastKnownPrice 
-            ? `Price data too stale (>${Math.floor((Date.now() - context.variables.lastPriceTimestamp) / 1000)}s old)`
-            : 'No valid price data available';
-          
-          console.error(`❌ [BUY PRICE ERROR] ${errorMsg}`);
-          console.error(`❌ [BUY PRICE ERROR] Cannot execute trade without current market price`);
-          
-          // Store error for user visibility
-          context.variables.executionError = errorMsg;
-          context.variables.executionSafelyStopped = true;
-          
-          return false; // STOP EXECUTION - DO NOT TRADE WITHOUT PRICE
-        }
+
+        // Valid TOKEN/SOL price
+        context.variables.currentPrice = price;
+        context.variables.priceSource = stepResult.source;
+        console.log(`✅ [BUY PRICE OK] TOKEN/SOL: ${price.toFixed(10)} from ${stepResult.source}`);
+
+        // Store additional price info for display
+        if (priceUSD) context.variables.tokenPriceUSD = priceUSD;
+        if (solPrice) context.variables.solPriceUSD = solPrice;
+
+        return true;
       },
       onSuccess: 'calculate_buy_amount',
       description: 'Validate TOKEN price in SOL (not SOL/USD price!)'
     });
-    
+
     // Step 2: Calculate EXACT buy amount (in SOL) based on detected sell volume (in tokens)
     steps.push({
       id: 'calculate_buy_amount',
@@ -2017,30 +2071,33 @@ export function createReactiveMirrorStrategy(config: {
       customCondition: (context: any) => {
         const sizingRule = config.sizingRule || 'mirror_sell_volume';
         const detectedTokenVolume = context.variables.detectedVolume || 1000; // Default: 1000 tokens
-        
+
         console.log(`\n====== CALCULATE BUY AMOUNT DEBUG ======`);
         console.log(`📌 Config sizingRule: ${sizingRule}`);
         console.log(`📌 Detected sell volume: ${detectedTokenVolume.toLocaleString()} tokens`);
-        
+
         // Get current token price - should be TOKEN/SOL, not SOL/USD!
         let currentPrice = context.variables?.currentPrice ||
-                          context.stepResults?.fetch_token_price_buy?.data?.price ||
-                          context.variables?.lastKnownPrice;
-        
+          context.stepResults?.fetch_token_price_buy?.data?.price ||
+          context.variables?.lastKnownPrice;
+
         console.log(`📌 Price from variables: ${context.variables?.currentPrice}`);
         console.log(`📌 Price from fetch: ${context.stepResults?.fetch_token_price_buy?.data?.price}`);
         console.log(`📌 Final price used: ${currentPrice}`);
-        
+
+        // Validate price - NO FALLBACKS!
         if (!currentPrice || currentPrice <= 0) {
-          console.warn(`⚠️ [BUY PRICE ERROR] Could not fetch price, using fallback`);
-          currentPrice = 0.0001;
-        } else if (currentPrice > 1) {
-          console.error(`❌ [BUY PRICE ERROR] Got invalid price ${currentPrice} (likely SOL/USD instead of TOKEN/SOL), using fallback`);
-          currentPrice = 0.0001;
+          console.error(`❌ [BUY PRICE ERROR] Could not fetch valid price`);
+          throw new Error('Cannot execute trade without current market price. Price fetch failed.');
         }
         
+        if (currentPrice >= 1) {
+          console.error(`❌ [BUY PRICE ERROR] Got invalid price ${currentPrice} (likely SOL/USD or TOKEN/USD, not TOKEN/SOL)`);
+          throw new Error(`Invalid price type: ${currentPrice}. Expected TOKEN/SOL price < 1.`);
+        }
+
         let calculatedSOL: number;
-        
+
         // CHECK IF USER SPECIFIED A FIXED BUY AMOUNT
         if (config.buyAmount && config.buyAmount > 0) {
           // USER SPECIFIED EXACT SOL AMOUNT - override any calculation
@@ -2051,7 +2108,7 @@ export function createReactiveMirrorStrategy(config: {
           // EXACT 1:1 MIRRORING: Buy the exact same token amount that sellers are selling
           // Convert detected token volume to SOL amount using current price
           calculatedSOL = detectedTokenVolume * currentPrice;
-          
+
           console.log(`🎯 [MIRROR MODE] Exact 1:1 mirroring enabled`);
           console.log(`📊 [MIRROR MODE] Detected sell: ${detectedTokenVolume.toLocaleString()} tokens`);
           console.log(`📊 [MIRROR MODE] Current price: ${currentPrice.toFixed(10)} SOL per token`);
@@ -2062,26 +2119,26 @@ export function createReactiveMirrorStrategy(config: {
           calculatedSOL = config.buyAmount || 0.01;
           console.log(`⚠️ [DEFAULT] Unknown sizingRule '${sizingRule}', using ${calculatedSOL} SOL`);
         }
-        
+
         // Store calculated SOL amount
         const finalSOL = Math.max(0.00001, calculatedSOL); // Minimum 0.00001 SOL
         context.variables.solAmountToBuy = finalSOL;
-        
+
         console.log(`🔢 [CALCULATED] Using calculated amount: ${finalSOL.toFixed(6)} SOL to buy ${(finalSOL / currentPrice).toLocaleString()} tokens`);
         console.log(`✅ [SIZING FINAL] Will buy with ${finalSOL.toFixed(6)} SOL`);
-        
+
         // Store price for next iteration
         if (context.stepResults?.fetch_token_price_buy?.data?.price) {
           context.variables.lastKnownPrice = context.stepResults.fetch_token_price_buy.data.price;
           context.variables.lastPriceTimestamp = Date.now();
         }
-        
+
         return true;
       },
       onSuccess: 'execute_mirror_buy',
       description: `Calculate buy amount (in SOL) using ${config.sizingRule || 'mirror_sell_volume'} sizing rule`
     });
-    
+
     steps.push({
       id: 'execute_mirror_buy',
       type: 'buy',
@@ -2090,7 +2147,7 @@ export function createReactiveMirrorStrategy(config: {
       onFailure: 'handle_failure',
       description: 'Execute mirrored buy order (dynamic SOL amount from calculate_buy_amount)'
     });
-    
+
     steps.push({
       id: 'log_buy_execution',
       type: 'condition' as const,
@@ -2099,7 +2156,7 @@ export function createReactiveMirrorStrategy(config: {
         context.variables.executionCount = (context.variables.executionCount || 0) + 1;
         const lastBuySOL = context.stepResults.execute_mirror_buy?.data?.solAmount || 0;
         console.log(`💰 [MIRROR BUY #${context.variables.executionCount}] Bought with ${lastBuySOL.toFixed(6)} SOL (dynamically calculated)`);
-        
+
         // Reset the flag AFTER Successful execution
         context.variables.realTradeDetected = false;
         console.log(`[FLAG RESET] Trade Processed successfully, ready for next event`);
@@ -2134,12 +2191,12 @@ export function createReactiveMirrorStrategy(config: {
   }
 
   console.log(`✅ [createReactiveMirrorStrategy] Strategy created with ${steps.length} steps`);
-  
+
   // CRITICAL FIX: Attach tokenAddress to strategy object so it can be used for WebSocket subscription
   const builtStrategy = strategyBuilder.getStrategy(config.id)!;
   (builtStrategy as any).tokenAddress = config.tokenAddress;
   console.log(`✅ [createReactiveMirrorStrategy] Attached tokenAddress to strategy: ${config.tokenAddress}`);
-  
+
   return builtStrategy;
 }
 
@@ -2186,19 +2243,19 @@ export function createContrarianVolatilityStrategy(config: {
         console.log(`📊 Token: ${config.tokenAddress}`);
         console.log(`📈 SELL Trigger: +${config.sellTriggerPercentage}% in ${config.sellTriggerTimeframeMinutes} min → Sell ${config.sellAmountTokens} tokens`);
         console.log(`📉 BUY Trigger: -${config.buyTriggerPercentage}% in ${config.buyTriggerTimeframeMinutes} min → Buy ${config.buyAmountSOL} SOL`);
-        
+
         context.variables.tokenAddress = config.tokenAddress;
         context.variables.strategyActive = true;
         context.variables.executionCount = 0;
         context.variables.lastCheckPrice = null;
         context.variables.priceHistory = [];
-        
+
         return true;
       },
       onSuccess: 'get_baseline_price',
       description: 'Initialize contrarian volatility strategy'
     },
-    
+
     // Get initial baseline price
     {
       id: 'get_baseline_price',
@@ -2207,7 +2264,7 @@ export function createContrarianVolatilityStrategy(config: {
       onFailure: 'wait_before_retry',
       description: 'Get baseline price for volatility tracking'
     },
-    
+
     {
       id: 'store_baseline',
       type: 'condition' as const,
@@ -2215,18 +2272,18 @@ export function createContrarianVolatilityStrategy(config: {
       customCondition: (context: any) => {
         const currentPrice = context.stepResults.get_baseline_price?.data?.price;
         if (!currentPrice) return false;
-        
+
         context.variables.baselinePrice = currentPrice;
         context.variables.baselineTimestamp = Date.now();
         context.variables.priceHistory.push({ price: currentPrice, timestamp: Date.now() });
-        
+
         console.log(`📊 [BASELINE] Set baseline price: ${currentPrice.toFixed(10)}`);
         return true;
       },
       onSuccess: 'wait_before_check',
       description: 'Store baseline price'
     },
-    
+
     // Main monitoring loop
     {
       id: 'wait_before_check',
@@ -2235,7 +2292,7 @@ export function createContrarianVolatilityStrategy(config: {
       onSuccess: 'check_stop_flag',
       description: 'Wait before next volatility check'
     },
-    
+
     {
       id: 'check_stop_flag',
       type: 'condition' as const,
@@ -2251,7 +2308,7 @@ export function createContrarianVolatilityStrategy(config: {
       onFailure: 'strategy_stopped',
       description: 'Check if strategy should stop'
     },
-    
+
     {
       id: 'get_current_price',
       type: 'getPrice',
@@ -2259,7 +2316,7 @@ export function createContrarianVolatilityStrategy(config: {
       onFailure: 'wait_before_check',
       description: 'Get current price for volatility analysis'
     },
-    
+
     {
       id: 'analyze_volatility',
       type: 'condition' as const,
@@ -2268,58 +2325,58 @@ export function createContrarianVolatilityStrategy(config: {
         const currentPrice = context.stepResults.get_current_price?.data?.price;
         const baselinePrice = context.variables.baselinePrice;
         const baselineTimestamp = context.variables.baselineTimestamp;
-        
+
         if (!currentPrice || !baselinePrice) return false;
-        
+
         const now = Date.now();
         const timeElapsedMinutes = (now - baselineTimestamp) / (1000 * 60);
-        
+
         // Add to price history
         context.variables.priceHistory.push({ price: currentPrice, timestamp: now });
-        
+
         // Keep only recent history (last 10 minutes)
         const tenMinutesAgo = now - (10 * 60 * 1000);
         context.variables.priceHistory = context.variables.priceHistory.filter(
           (entry: any) => entry.timestamp > tenMinutesAgo
         );
-        
+
         // Calculate price change percentage
         const priceChangePercent = ((currentPrice - baselinePrice) / baselinePrice) * 100;
-        
+
         console.log(`📊 [VOLATILITY CHECK] Price: ${currentPrice.toFixed(10)}, Baseline: ${baselinePrice.toFixed(10)}, Change: ${priceChangePercent.toFixed(2)}%, Time: ${timeElapsedMinutes.toFixed(2)} min`);
-        
+
         // Check SELL condition (price rose rapidly)
-        if (priceChangePercent >= config.sellTriggerPercentage && 
-            timeElapsedMinutes <= config.sellTriggerTimeframeMinutes) {
+        if (priceChangePercent >= config.sellTriggerPercentage &&
+          timeElapsedMinutes <= config.sellTriggerTimeframeMinutes) {
           console.log(`🔴 [SELL TRIGGER] Price rose ${priceChangePercent.toFixed(2)}% in ${timeElapsedMinutes.toFixed(2)} minutes!`);
           context.variables.triggerType = 'sell';
           context.variables.triggerPrice = currentPrice;
           return true;
         }
-        
+
         // Check BUY condition (price dropped sharply)
-        if (priceChangePercent <= -config.buyTriggerPercentage && 
-            timeElapsedMinutes <= config.buyTriggerTimeframeMinutes) {
+        if (priceChangePercent <= -config.buyTriggerPercentage &&
+          timeElapsedMinutes <= config.buyTriggerTimeframeMinutes) {
           console.log(`🟢 [BUY TRIGGER] Price dropped ${Math.abs(priceChangePercent).toFixed(2)}% in ${timeElapsedMinutes.toFixed(2)} minutes!`);
           context.variables.triggerType = 'buy';
           context.variables.triggerPrice = currentPrice;
           return true;
         }
-        
+
         // Reset baseline if timeframe exceeded without trigger
         if (timeElapsedMinutes > Math.max(config.sellTriggerTimeframeMinutes, config.buyTriggerTimeframeMinutes)) {
           console.log(`⏰ [RESET] Timeframe exceeded, resetting baseline to current price`);
           context.variables.baselinePrice = currentPrice;
           context.variables.baselineTimestamp = now;
         }
-        
+
         return false;
       },
       onSuccess: 'route_to_action',
       onFailure: 'wait_before_check',
       description: 'Analyze price volatility for triggers'
     },
-    
+
     {
       id: 'route_to_action',
       type: 'condition' as const,
@@ -2331,7 +2388,7 @@ export function createContrarianVolatilityStrategy(config: {
       onFailure: 'execute_contrarian_buy',
       description: 'Route to sell or buy action'
     },
-    
+
     // SELL execution
     {
       id: 'execute_contrarian_sell',
@@ -2341,7 +2398,7 @@ export function createContrarianVolatilityStrategy(config: {
       onFailure: 'handle_execution_failure',
       description: `Contrarian SELL: ${config.sellAmountTokens} tokens (price rose ${config.sellTriggerPercentage}%)`
     },
-    
+
     {
       id: 'log_sell_execution',
       type: 'condition' as const,
@@ -2350,17 +2407,17 @@ export function createContrarianVolatilityStrategy(config: {
         context.variables.executionCount = (context.variables.executionCount || 0) + 1;
         const triggerPrice = context.variables.triggerPrice;
         console.log(`💰 [CONTRARIAN SELL #${context.variables.executionCount}] Sold ${config.sellAmountTokens} tokens at ${triggerPrice.toFixed(10)} (price spike)`);
-        
+
         // Reset baseline after execution
         context.variables.baselinePrice = triggerPrice;
         context.variables.baselineTimestamp = Date.now();
-        
+
         return true;
       },
       onSuccess: 'wait_before_check',
       description: 'Log sell execution and reset baseline'
     },
-    
+
     // BUY execution
     {
       id: 'execute_contrarian_buy',
@@ -2370,7 +2427,7 @@ export function createContrarianVolatilityStrategy(config: {
       onFailure: 'handle_execution_failure',
       description: `Contrarian BUY: ${config.buyAmountSOL} SOL (price dropped ${config.buyTriggerPercentage}%)`
     },
-    
+
     {
       id: 'log_buy_execution',
       type: 'condition' as const,
@@ -2379,17 +2436,17 @@ export function createContrarianVolatilityStrategy(config: {
         context.variables.executionCount = (context.variables.executionCount || 0) + 1;
         const triggerPrice = context.variables.triggerPrice;
         console.log(`💰 [CONTRARIAN BUY #${context.variables.executionCount}] Bought ${config.buyAmountSOL} SOL at ${triggerPrice.toFixed(10)} (price dip)`);
-        
+
         // Reset baseline after execution
         context.variables.baselinePrice = triggerPrice;
         context.variables.baselineTimestamp = Date.now();
-        
+
         return true;
       },
       onSuccess: 'wait_before_check',
       description: 'Log buy execution and reset baseline'
     },
-    
+
     {
       id: 'handle_execution_failure',
       type: 'wait',
@@ -2397,7 +2454,7 @@ export function createContrarianVolatilityStrategy(config: {
       onSuccess: 'wait_before_check',
       description: 'Handle execution failure and continue monitoring'
     },
-    
+
     {
       id: 'wait_before_retry',
       type: 'wait',
@@ -2405,7 +2462,7 @@ export function createContrarianVolatilityStrategy(config: {
       onSuccess: 'get_baseline_price',
       description: 'Wait before retrying price fetch'
     },
-    
+
     {
       id: 'strategy_stopped',
       type: 'condition' as const,
@@ -2441,10 +2498,10 @@ export function createStrategyFromTemplate(templateName: string, config: any): S
   // AI generates { template: "custom", strategyType: "time_based_dca", ... }
   // We need to route "time_based_dca" to DCA template, not custom!
   let actualTemplate = templateName.toLowerCase();
-  
+
   if (actualTemplate === 'custom' && config.strategyType) {
     const strategyType = config.strategyType.toLowerCase();
-    
+
     // Map AI strategy types to execution templates
     if (strategyType === 'time_based_dca' || strategyType === 'dca' || strategyType === 'dollar_cost_averaging') {
       actualTemplate = 'dca';
@@ -2477,9 +2534,9 @@ export function createStrategyFromTemplate(templateName: string, config: any): S
         side: config.side || 'buy',
         tokenAddress: config.tokenAddress  // Pass tokenAddress through
       };
-      
+
       console.log(`[StrategyTemplates] Creating DCA Strategy with mapped config:`, dcaConfig);
-      
+
       // Check if this is a SELL DCA or BUY DCA
       if (dcaConfig.sellAmountSOL || dcaConfig.side === 'sell') {
         return createDCASellStrategy({
