@@ -574,11 +574,11 @@ export class StrategyRegistry {
     this.register({
       type: 'reactive',
       displayName: 'Reactive Trading',
-      description: 'Mirror or counter real-time market activity. Execute trades in response to detected buy/sell patterns.',
+      description: '⚡ Mirror or counter real-time market activity. Execute trades in response to detected buy/sell patterns. When sizingRule is "mirror_volume" or "mirror_buy_volume", NO amount field is required - the strategy automatically mirrors detected trade sizes.',
       category: 'trend',
       riskLevel: 'high',
       version: '1.0.0',
-      aiPromptHint: 'User wants to react to market activity, mirror trades, or follow volume.',
+      aiPromptHint: '⚡ CRITICAL: User wants to react to market activity, mirror trades, or follow volume. When using mirror mode (sizingRule: mirror_volume or mirror_buy_volume), DO NOT require sellAmountTokens or buyAmountSOL - these are calculated dynamically from detected trades.',
       aiDetectionKeywords: [
         'when others buy',
         'mirror',
@@ -587,18 +587,24 @@ export class StrategyRegistry {
         'react to market',
         'match buying',
         'follow volume',
-        'shadow trading'
+        'shadow trading',
+        'exact amount',
+        'same amount',
+        'mirror sell',
+        'mirror buy'
       ],
       exampleInputs: [
         'Sell when people are buying this token',
         'Mirror buy activity - match their volume',
-        'React to large purchases by selling the same amount'
+        'React to large purchases by selling the same amount',
+        'I want to mirror sell - sell exact amount when people buy'
       ],
       recommendedFor: [
         'High-volume tokens',
         'Liquidity provision',
         'Market making',
-        'Contrarian exits'
+        'Contrarian exits',
+        'Mirror trading'
       ],
       fields: [
         {
@@ -614,19 +620,19 @@ export class StrategyRegistry {
           name: 'trigger',
           type: 'string',
           required: true,
-          description: 'What market activity triggers the reaction (e.g., mirror_buy_activity, large_sell)',
+          description: 'What market activity triggers the reaction (e.g., mirror_buy_activity, mirror_sell_activity, large_buy, large_sell)',
         },
         {
           name: 'side',
           type: 'string',
           required: true,
-          description: 'Trade side: buy or sell',
+          description: 'Trade side: buy or sell - what YOU will do in response to detected activity',
         },
         {
           name: 'sizingRule',
           type: 'string',
           required: false,
-          description: 'How to size the trade (e.g., mirror_buy_volume, fixed_amount)',
+          description: '⚡ IMPORTANT: How to size the trade. Use "mirror_volume" or "mirror_buy_volume" to automatically match detected trade sizes (NO amount field needed). Use "fixed_amount" if you want to trade a fixed amount regardless of detected size.',
           defaultValue: 'mirror_buy_volume'
         }
       ],

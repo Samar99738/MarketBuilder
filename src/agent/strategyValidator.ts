@@ -98,8 +98,34 @@ export class StrategyValidator {
       }
     }
 
-    // 6. Additional warnings for specific strategies
+    // Additional warnings and SPECIAL COMPLETENESS HANDLING for specific strategies
     if (strategyDef) {
+      // REACTIVE STRATEGY SPECIAL HANDLING: Mirror mode doesn't need amount fields
+      if (config.strategyType === 'reactive') {
+        const isMirrorMode = config.sizingRule && 
+          (config.sizingRule.includes('mirror') || config.sizingRule === 'mirror_volume' || config.sizingRule === 'mirror_buy_volume');
+        const isSellStrategy = config.side === 'sell';
+        
+        console.log(`🔍 [VALIDATOR] Reactive strategy validation - side: ${config.side}, isMirrorMode: ${isMirrorMode}, sizingRule: ${config.sizingRule}`);
+        
+        if (isMirrorMode && isSellStrategy) {
+          // Mirror SELL strategies don't need sellAmountTokens - they mirror detected buys
+          // Remove sellAmountTokens from missing fields if present
+          const amountFieldIndex = result.missingFields.indexOf('sellAmountTokens');
+          if (amountFieldIndex !== -1) {
+            result.missingFields.splice(amountFieldIndex, 1);
+          }
+          console.log(`✅ [VALIDATOR] SELL strategy in mirror mode - amount NOT required`);
+        } else if (isMirrorMode && !isSellStrategy) {
+          // Mirror BUY strategies don't need buyAmountSOL - they mirror detected sells
+          const amountFieldIndex = result.missingFields.indexOf('buyAmountSOL');
+          if (amountFieldIndex !== -1) {
+            result.missingFields.splice(amountFieldIndex, 1);
+          }
+          console.log(`✅ [VALIDATOR] BUY strategy in mirror mode - amount NOT required`);
+        }
+      }
+      
       if (config.strategyType === 'contrarian_volatility') {
         if (!config.sellTriggerTimeframeMinutes) {
           result.warnings.push('sellTriggerTimeframeMinutes not specified (will use default)');

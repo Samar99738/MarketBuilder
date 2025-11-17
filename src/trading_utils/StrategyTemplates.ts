@@ -1014,7 +1014,8 @@ export function createCustomStrategy(config: {
     console.log(`🎯 [createCustomStrategy] Creating REACTIVE mirror strategy with config:`, {
       sellAmountTokens: config.sellAmountTokens,
       sizingRule: config.sizingRule,
-      side: config.side
+      side: config.side,
+      tokenAddress: config.tokenAddress
     });
     return createReactiveMirrorStrategy({
       id: config.id,
@@ -2194,6 +2195,14 @@ export function createReactiveMirrorStrategy(config: {
 
   // CRITICAL FIX: Attach tokenAddress to strategy object so it can be used for WebSocket subscription
   const builtStrategy = strategyBuilder.getStrategy(config.id)!;
+  
+  // Validate and attach tokenAddress
+  if (!config.tokenAddress) {
+    console.error(`❌ [createReactiveMirrorStrategy] CRITICAL: config.tokenAddress is missing!`);
+    console.error(`❌ [createReactiveMirrorStrategy] Config:`, JSON.stringify(config, null, 2));
+    throw new Error('tokenAddress is required for reactive mirror strategies');
+  }
+  
   (builtStrategy as any).tokenAddress = config.tokenAddress;
   console.log(`✅ [createReactiveMirrorStrategy] Attached tokenAddress to strategy: ${config.tokenAddress}`);
 
