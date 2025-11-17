@@ -9,6 +9,7 @@ import { EventEmitter } from 'events';
 import { SolanaTradeMonitor } from './SolanaTradeMonitor';
 import { PumpFunWebSocketListener } from '../../trading_utils/PumpFunWebSocketListener';
 import { RaydiumWebSocketListener } from '../../trading_utils/RaydiumWebSocketListener';
+import { JupiterWebSocketListener } from '../../trading_utils/JupiterWebSocketListener';
 import { TokenRouter, getTokenRouter } from '../../trading_utils/TokenRouter';
 import { Connection } from '@solana/web3.js';
 import { Server as SocketServer } from 'socket.io';
@@ -48,6 +49,7 @@ export class RealTradeFeedService extends EventEmitter {
   private tradeMonitor: SolanaTradeMonitor;
   private webSocketListener?: PumpFunWebSocketListener;
   private raydiumListener?: RaydiumWebSocketListener;
+  private jupiterListener?: JupiterWebSocketListener;
   private tokenRouter: TokenRouter;
   private io: SocketServer;
   private rpcUrl: string;
@@ -93,6 +95,9 @@ export class RealTradeFeedService extends EventEmitter {
 
     // Initialize Raydium WebSocket Listener (graduated tokens)
     this.raydiumListener = new RaydiumWebSocketListener(this.rpcUrl);
+
+    // Initialize Jupiter WebSocket Listener (aggregator trades - captures most DexScreener trades)
+    this.jupiterListener = new JupiterWebSocketListener(this.rpcUrl);
     
     this.setupEventHandlers();
     this.setupEventForwarding();
@@ -352,8 +357,46 @@ export class RealTradeFeedService extends EventEmitter {
         this.handleRealTrade(trade);
       });
       
+      // Listen for heartbeat events (listener is processing transactions, even if rejecting them)
+      this.raydiumListener.on('heartbeat', (data: any) => {
+        // Update last trade timestamp to prevent false "connection dead" alerts
+        this.lastTradeTimestamp = Date.now();
+        console.log(`💓 [RealTradeFeedService] Raydium heartbeat - listener is alive (processed: ${data.processed}, matched: ${data.matched})`);
+      });
+      
       console.log('[RealTradeFeedService] ✅ Event handlers connected to RaydiumWebSocketListener');
       console.log('[RealTradeFeedService] 🌊 Monitoring Raydium graduated tokens');
+    }
+
+    // Listen for Jupiter aggregator trades (captures most DexScreener trades!)
+    if (this.jupiterListener) {
+      this.jupiterListener.on('trade', (tradeData: any) => {
+        // Convert Jupiter trade format to RealTradeEvent format
+        const trade: RealTradeEvent = {
+          tokenAddress: tradeData.tokenMint.toLowerCase(),
+          type: tradeData.isBuy ? 'buy' : 'sell',
+          solAmount: tradeData.solAmount,
+          tokenAmount: tradeData.tokenAmount,
+          trader: tradeData.user,
+          signature: tradeData.signature || 'jupiter-' + Date.now(),
+          timestamp: tradeData.timestamp * 1000,
+          price: tradeData.price,
+          isRealTrade: true,
+        };
+        
+        console.log(`⚡ [RealTradeFeedService] Jupiter trade detected (aggregator route)`);
+        
+        this.handleRealTrade(trade);
+      });
+      
+      // Listen for heartbeat events
+      this.jupiterListener.on('heartbeat', (data: any) => {
+        this.lastTradeTimestamp = Date.now();
+        console.log(`💓 [RealTradeFeedService] Jupiter heartbeat - listener is alive (processed: ${data.processed}, matched: ${data.matched})`);
+      });
+      
+      console.log('[RealTradeFeedService] ✅ Event handlers connected to JupiterWebSocketListener');
+      console.log('[RealTradeFeedService] ⚡ Monitoring Jupiter aggregator routes (CAPTURES MOST DEXSCREENER TRADES)');
     }
   }
 
@@ -386,10 +429,11 @@ export class RealTradeFeedService extends EventEmitter {
    * Check if we're still receiving trades
    */
   private checkConnectionHealth(): void {
-    // Get monitored tokens from both listeners
+    // Get monitored tokens from all listeners
     const pumpTokens = this.webSocketListener?.getMonitoredTokens() || [];
     const raydiumTokens = this.raydiumListener?.getMonitoredTokens() || [];
-    const monitoredTokens = [...pumpTokens, ...raydiumTokens];
+    const jupiterTokens = this.jupiterListener?.getMonitoredTokens() || [];
+    const monitoredTokens = [...pumpTokens, ...raydiumTokens, ...jupiterTokens];
     
     if (monitoredTokens.length === 0) {
       return;
@@ -417,6 +461,7 @@ export class RealTradeFeedService extends EventEmitter {
           minutesSinceLastTrade,
           pumpFunActive: this.webSocketListener?.isActive() || false,
           raydiumActive: this.raydiumListener?.isActive() || false,
+          jupiterActive: this.jupiterListener?.isActive() || false,
           message: 'No trades detected recently. Connection may be dead.',
           timestamp: Date.now()
         });
@@ -465,6 +510,18 @@ export class RealTradeFeedService extends EventEmitter {
             await this.raydiumListener.start(token);
           }
           console.log(`[RealTradeFeedService] ✅ Raydium reconnected: ${raydiumTokens.length} tokens`);
+        }
+      }
+
+      // Reconnect Jupiter listener
+      if (this.jupiterListener) {
+        const jupiterTokens = this.jupiterListener.getMonitoredTokens();
+        if (jupiterTokens.length > 0) {
+          await this.jupiterListener.stop();
+          for (const token of jupiterTokens) {
+            await this.jupiterListener.start(token);
+          }
+          console.log(`[RealTradeFeedService] ✅ Jupiter reconnected: ${jupiterTokens.length} tokens`);
         }
       }
     } catch (error) {
@@ -529,6 +586,10 @@ export class RealTradeFeedService extends EventEmitter {
     if (this.raydiumListener) {
       await this.raydiumListener.stop();
     }
+
+    if (this.jupiterListener) {
+      await this.jupiterListener.stop();
+    }
     
     this.removeAllListeners();
     console.log('[RealTradeFeedService] Service stopped');
@@ -561,42 +622,65 @@ export class RealTradeFeedService extends EventEmitter {
           success = true;
         }
       } else if (route.tokenInfo.metadata?.isPumpToken && route.tokenInfo.metadata?.isGraduated) {
-        // Graduated pump.fun token - ONLY use Raydium (graduated tokens don't trade on PumpFun anymore!)
+        // Graduated pump.fun token - Use BOTH Raydium + Jupiter (most DexScreener trades use Jupiter!)
         console.log(`🎓 [RealTradeFeedService] Graduated Pump.fun token detected`);
-        console.log(`⚠️ [RealTradeFeedService] IMPORTANT: Graduated tokens ONLY trade on Raydium, NOT on PumpFun bonding curve!`);
-        console.log(`📌 [RealTradeFeedService] Strategy: Raydium WebSocket ONLY`);
+        console.log(`⚠️ [RealTradeFeedService] IMPORTANT: Graduated tokens don't trade on PumpFun bonding curve anymore!`);
+        console.log(`📌 [RealTradeFeedService] Strategy: MULTI-DEX (Raydium + Jupiter) for maximum coverage`);
         
-        // ONLY use Raydium for graduated tokens
+        // Start Raydium listener (direct pool swaps)
         if (this.raydiumListener) {
           console.log(`🌊 [RealTradeFeedService] Starting Raydium WebSocket listener...`);
           try {
             await this.raydiumListener.start(tokenAddress);
             success = true;
             console.log(`✅ [RealTradeFeedService] Raydium listener started successfully`);
-            console.log(`🎯 [RealTradeFeedService] RAYDIUM-ONLY MONITORING ACTIVE`);
           } catch (error) {
-            console.error(`❌ [RealTradeFeedService] Raydium listener failed:`, error instanceof Error ? error.message : error);
-            console.error(`💡 [RealTradeFeedService] This means either:`);
-            console.error(`   1. Pool doesn't exist on Raydium yet`);
-            console.error(`   2. DexScreener returned wrong pool address`);
-            console.error(`   3. Network/RPC issues`);
+            console.log(`⚠️ [RealTradeFeedService] Raydium listener failed (this is OK if token uses Jupiter):`, error instanceof Error ? error.message : error);
+          }
+        }
+        
+        // CRITICAL: Also start Jupiter listener (captures aggregator trades - 70-80% of DexScreener trades!)
+        if (this.jupiterListener) {
+          console.log(`⚡ [RealTradeFeedService] Starting Jupiter WebSocket listener...`);
+          try {
+            await this.jupiterListener.start(tokenAddress);
+            success = true; // Jupiter success is enough for graduated tokens
+            console.log(`✅ [RealTradeFeedService] Jupiter listener started successfully`);
+            console.log(`🎯 [RealTradeFeedService] MULTI-DEX MONITORING ACTIVE (Raydium + Jupiter)`);
+            console.log(`📊 [RealTradeFeedService] Will capture BOTH direct Raydium swaps AND Jupiter aggregator routes`);
+          } catch (error) {
+            console.error(`❌ [RealTradeFeedService] Jupiter listener failed:`, error instanceof Error ? error.message : error);
           }
         }
         
         if (!success) {
-          console.error(`❌ [RealTradeFeedService] Failed to start Raydium listener for graduated token!`);
-          console.error(`⚠️ [RealTradeFeedService] Cannot monitor this token - please verify pool exists on Raydium`);
+          console.error(`❌ [RealTradeFeedService] Failed to start any listener for graduated token!`);
+          console.error(`⚠️ [RealTradeFeedService] Cannot monitor this token - please verify pool exists`);
         }
       } else {
-        // Use Raydium listener for standard tokens
-        console.log(`📝 [RealTradeFeedService] Standard token - Using Raydium WebSocket listener`);
+        // Use BOTH Raydium and Jupiter for standard/graduated tokens
+        console.log(`📝 [RealTradeFeedService] Standard/graduated token - Using MULTI-DEX monitoring`);
+        
+        // Start Raydium listener (direct pool swaps)
         if (this.raydiumListener) {
           try {
             await this.raydiumListener.start(tokenAddress);
             success = true;
-            console.log(`✅ [RealTradeFeedService] Raydium listener started successfully`);
+            console.log(`✅ [RealTradeFeedService] Raydium listener started`);
           } catch (error) {
-            console.error(`❌ [RealTradeFeedService] Raydium listener failed:`, error instanceof Error ? error.message : error);
+            console.log(`⚠️ [RealTradeFeedService] Raydium listener failed (this is OK if token uses Jupiter):`, error instanceof Error ? error.message : error);
+          }
+        }
+
+        // CRITICAL: Also start Jupiter listener (captures aggregator trades)
+        if (this.jupiterListener) {
+          try {
+            await this.jupiterListener.start(tokenAddress);
+            success = true; // Jupiter success is enough
+            console.log(`✅ [RealTradeFeedService] Jupiter listener started (will capture aggregator trades)`);
+            console.log(`🎯 [RealTradeFeedService] MULTI-DEX MONITORING ACTIVE (Raydium + Jupiter)`);
+          } catch (error) {
+            console.error(`❌ [RealTradeFeedService] Jupiter listener failed:`, error instanceof Error ? error.message : error);
           }
         }
       }
@@ -648,7 +732,7 @@ export class RealTradeFeedService extends EventEmitter {
    * Unsubscribe from token trades
    */
   async unsubscribeFromToken(tokenAddress: string, socketId: string): Promise<void> {
-    // Try both listeners (one will be monitoring this token)
+    // Try all listeners
     if (this.webSocketListener && this.webSocketListener.isMonitoringToken(tokenAddress)) {
       await this.webSocketListener.stopToken(tokenAddress);
       console.log(`🛑 [RealTradeFeedService] Unsubscribed from PumpFun: ${tokenAddress}`);
@@ -657,6 +741,11 @@ export class RealTradeFeedService extends EventEmitter {
     if (this.raydiumListener && this.raydiumListener.isMonitoringToken(tokenAddress)) {
       await this.raydiumListener.stopToken(tokenAddress);
       console.log(`🛑 [RealTradeFeedService] Unsubscribed from Raydium: ${tokenAddress}`);
+    }
+
+    if (this.jupiterListener && this.jupiterListener.isMonitoringToken(tokenAddress)) {
+      await this.jupiterListener.stopToken(tokenAddress);
+      console.log(`🛑 [RealTradeFeedService] Unsubscribed from Jupiter: ${tokenAddress}`);
     }
   }
 
@@ -753,7 +842,8 @@ export class RealTradeFeedService extends EventEmitter {
   isMonitoring(tokenAddress: string): boolean {
     const isPumpMonitoring = this.webSocketListener?.isMonitoringToken(tokenAddress) || false;
     const isRaydiumMonitoring = this.raydiumListener?.isMonitoringToken(tokenAddress) || false;
-    return isPumpMonitoring || isRaydiumMonitoring;
+    const isJupiterMonitoring = this.jupiterListener?.isMonitoringToken(tokenAddress) || false;
+    return isPumpMonitoring || isRaydiumMonitoring || isJupiterMonitoring;
   }
 
   /**
@@ -762,18 +852,21 @@ export class RealTradeFeedService extends EventEmitter {
   getStats() {
     const pumpTokens = this.webSocketListener?.getMonitoredTokens() || [];
     const raydiumTokens = this.raydiumListener?.getMonitoredTokens() || [];
-    const totalMonitored = pumpTokens.length + raydiumTokens.length;
+    const jupiterTokens = this.jupiterListener?.getMonitoredTokens() || [];
+    const totalMonitored = pumpTokens.length + raydiumTokens.length + jupiterTokens.length;
     
     return {
       tokensMonitored: totalMonitored,
       pumpFunTokens: pumpTokens.length,
       raydiumTokens: raydiumTokens.length,
+      jupiterTokens: jupiterTokens.length,
       tokensWithStats: this.tradeStats.size,
       totalTradesBuffered: Array.from(this.recentTrades.values())
         .reduce((sum, trades) => sum + trades.length, 0),
-      method: 'Dual WebSocket monitoring (PumpFun + Raydium)',
+      method: 'Multi-DEX WebSocket monitoring (PumpFun + Raydium + Jupiter)',
       pumpFunConnected: this.webSocketListener?.isActive() || false,
       raydiumConnected: this.raydiumListener?.isActive() || false,
+      jupiterConnected: this.jupiterListener?.isActive() || false,
       isConnected: totalMonitored > 0,
     };
   }
