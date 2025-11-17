@@ -994,10 +994,15 @@ export class StrategyBuilder {
         }
 
       case "getPrice":
+        // FIX #5: Require explicit tokenAddress from context (no ENV_CONFIG fallback)
+        const tokenAddress = context.variables.tokenAddress;
+        
+        if (!tokenAddress || tokenAddress.length !== 44) {
+          throw new Error(`tokenAddress is required for getPrice step. Received: ${tokenAddress}`);
+        }
+        
         // Use MarketDataProvider which returns CORRECT price types
-        const marketData = await marketDataProvider.fetchTokenPrice(
-          context.variables.tokenAddress || ENV_CONFIG.TOKEN_ADDRESS
-        );
+        const marketData = await marketDataProvider.fetchTokenPrice(tokenAddress);
 
         if (!marketData) {
           throw new Error('Failed to fetch market data');

@@ -26,12 +26,72 @@ export class PaperTradingProvider implements TradingProvider {
   }
 
   /**
+   * Simulate an initial virtual position for paper trading
+   * Used for reactive sell strategies where user wants to start with tokens
+   */
+  async simulateInitialPosition(tokenAddress: string, amount: number): Promise<void> {
+    try {
+      console.log(`📦 [PaperTradingProvider] Creating initial virtual position:`);
+      console.log(`   Token: ${tokenAddress.substring(0, 8)}...`);
+      console.log(`   Amount: ${amount.toLocaleString()} tokens`);
+      
+      // Get session state
+      const state = paperTradingEngine.getSession(this.sessionId);
+      if (!state) {
+        console.warn(`⚠️ [PaperTradingProvider] Session not found: ${this.sessionId}`);
+        return;
+      }
+      
+      // Fetch current price for tracking
+      const currentPrice = await getTokenPriceUSD(tokenAddress);
+      const solPrice = await getSolPriceUSD();
+      const priceInSOL = currentPrice && solPrice && typeof currentPrice === 'number' && typeof solPrice === 'number' 
+        ? currentPrice / solPrice 
+        : 0;
+      
+      // Add position to portfolio Map with full PaperPosition structure
+      const currentTimestamp = Date.now();
+      const currentPriceUSD = currentPrice && typeof currentPrice === 'number' ? currentPrice : 0;
+      
+      const position: import('./types').PaperPosition = {
+        tokenAddress,
+        tokenSymbol: 'TOKEN', // Will be updated on first real fetch
+        amount,
+        averageEntryPrice: 0, // Zero cost - virtual airdrop
+        totalInvestedSOL: 0,
+        totalInvestedUSD: 0,
+        currentPrice: priceInSOL,
+        currentValueSOL: amount * priceInSOL,
+        currentValueUSD: amount * currentPriceUSD,
+        unrealizedPnL: 0, // No cost basis = no PnL
+        unrealizedPnLPercentage: 0,
+        firstTradeTimestamp: currentTimestamp,
+        lastTradeTimestamp: currentTimestamp,
+        tradeCount: 0 // No actual trades - just initial position
+      };
+      
+      state.portfolio.positions.set(tokenAddress, position);
+      state.portfolio.balanceTokens = amount;
+      
+      console.log(`✅ [PaperTradingProvider] Virtual position added successfully`);
+      console.log(`   Price (SOL): ${priceInSOL.toFixed(9)}`);
+    } catch (error) {
+      console.error(`❌ [PaperTradingProvider] Failed to create initial position:`, error);
+      // Don't throw - just log error and continue
+    }
+  }
+
+  /**
    * Execute a paper buy order
    */
   async buyTokens(amountInSol: number, context?: any): Promise<string> {
     try {
-      // Use token address from context if available, otherwise fall back to stored or ENV_CONFIG
-      const tokenAddress = context?.variables?.tokenAddress || this.tokenAddress || ENV_CONFIG.TOKEN_ADDRESS;
+      // FIX #5: Require explicit tokenAddress from context or constructor (no ENV_CONFIG fallback)
+      const tokenAddress = context?.variables?.tokenAddress || this.tokenAddress;
+      
+      if (!tokenAddress || tokenAddress.length !== 44) {
+        throw new Error(`[PaperTradingProvider] tokenAddress is required for buyTokens. Received: ${tokenAddress}`);
+      }
       
       // Update stored token address if provided in context
       if (context?.variables?.tokenAddress && !this.tokenAddress) {
@@ -122,8 +182,12 @@ export class PaperTradingProvider implements TradingProvider {
         throw new Error(`[PaperTradingProvider] Invalid sell amount: ${actualAmountToSell}. Must be -1 (all) or positive number.`);
       }
 
-      // Use token address from context if available, otherwise fall back to stored or ENV_CONFIG
-      const tokenAddress = context?.variables?.tokenAddress || this.tokenAddress || ENV_CONFIG.TOKEN_ADDRESS;
+      // FIX #5: Require explicit tokenAddress from context or constructor (no ENV_CONFIG fallback)
+      const tokenAddress = context?.variables?.tokenAddress || this.tokenAddress;
+      
+      if (!tokenAddress || tokenAddress.length !== 44) {
+        throw new Error(`[PaperTradingProvider] tokenAddress is required for sellTokens. Received: ${tokenAddress}`);
+      }
       
       // Update stored token address if provided in context
       if (context?.variables?.tokenAddress && !this.tokenAddress) {
@@ -173,8 +237,12 @@ export class PaperTradingProvider implements TradingProvider {
    * Get token price (uses real market data)
    */
   async getTokenPriceUSD(): Promise<PriceResult> {
-    // Use stored token address or fall back to ENV_CONFIG
-    const tokenAddress = this.tokenAddress || ENV_CONFIG.TOKEN_ADDRESS;
+    // FIX #5: Require explicit tokenAddress from constructor (no ENV_CONFIG fallback)
+    const tokenAddress = this.tokenAddress;
+    
+    if (!tokenAddress || tokenAddress.length !== 44) {
+      throw new Error(`[PaperTradingProvider] tokenAddress is required for getTokenPriceUSD. Received: ${tokenAddress}`);
+    }
     const result = await getTokenPriceUSD(tokenAddress);
     return {
       price: result.price,
@@ -187,8 +255,12 @@ export class PaperTradingProvider implements TradingProvider {
    * Get Jupiter token price (uses real market data)
    */
   async getJupiterTokenPrice(): Promise<PriceResult> {
-    // Use stored token address or fall back to ENV_CONFIG
-    const tokenAddress = this.tokenAddress || ENV_CONFIG.TOKEN_ADDRESS;
+    // FIX #5: Require explicit tokenAddress from constructor (no ENV_CONFIG fallback)
+    const tokenAddress = this.tokenAddress;
+    
+    if (!tokenAddress || tokenAddress.length !== 44) {
+      throw new Error(`[PaperTradingProvider] tokenAddress is required for getJupiterTokenPrice. Received: ${tokenAddress}`);
+    }
     const result = await getTokenPriceUSD(tokenAddress);
     return {
       price: result.price,

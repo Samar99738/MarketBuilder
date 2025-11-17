@@ -128,6 +128,7 @@ export class RealTradeFeedService extends EventEmitter {
 
   /**
    * Check if trade should be forwarded based on strategy filters
+   * FIX #4: Corrected filter logic - mirror_buy_activity means "watch for BUYs to trigger SELL"
    */
   private shouldForwardTrade(trade: RealTradeEvent): boolean {
     const normalized = trade.tokenAddress.toLowerCase();
@@ -138,17 +139,18 @@ export class RealTradeFeedService extends EventEmitter {
       return true;
     }
     
-    // Extract what trade type the strategy is WATCHING FOR
-    // mirror_buy_activity = watching for BUYs (to then execute SELLs)
-    // mirror_sell_activity = watching for SELLs (to then execute BUYs)
+    // FIX #4: Correct reactive strategy logic
+    // mirror_buy_activity = watching for BUYs (strategy will execute SELL when detected)
+    // mirror_sell_activity = watching for SELLs (strategy will execute BUY when detected)
+    // So we forward the SAME type that the trigger is watching for
     const watchingFor = filter.trigger.includes('buy') ? 'buy' : 'sell';
     
     const matches = trade.type === watchingFor;
     
     if (!matches) {
-      console.log(`🔇 [FILTER] ${trade.type.toUpperCase()} trade FILTERED OUT (watching for ${watchingFor.toUpperCase()})`);
+      console.log(`🔇 [FILTER] ${trade.type.toUpperCase()} trade FILTERED OUT (watching for ${watchingFor.toUpperCase()}, strategy will ${filter.side.toUpperCase()})`);
     } else {
-      console.log(`✅ [FILTER] ${trade.type.toUpperCase()} trade MATCHES filter (watching for ${watchingFor.toUpperCase()})`);
+      console.log(`✅ [FILTER] ${trade.type.toUpperCase()} trade MATCHES filter (watching for ${watchingFor.toUpperCase()}, strategy will ${filter.side.toUpperCase()})`);
     }
     
     return matches;

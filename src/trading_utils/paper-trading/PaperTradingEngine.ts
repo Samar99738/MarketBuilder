@@ -75,8 +75,21 @@ export class PaperTradingEngine {
       if (!state.isActive) continue;
 
       try {
+        // FIX #5: Get token address from portfolio positions (no hardcoded fallback)
+        // Skip periodic updates if no token position exists
+        const positions = Array.from((state.portfolio as any).positions?.values() || []);
+        if (positions.length === 0) continue;
+        
+        const firstPosition = positions[0] as any;
+        const tokenAddress = firstPosition?.tokenAddress;
+        
+        if (!tokenAddress || tokenAddress.length !== 44) {
+          console.warn(`[PaperTradingEngine] Invalid token address in position: ${tokenAddress}`);
+          continue;
+        }
+        
         // Get current market price for the token
-        const currentPrice = await marketDataProvider.fetchTokenPrice(ENV_CONFIG.TOKEN_ADDRESS);
+        const currentPrice = await marketDataProvider.fetchTokenPrice(tokenAddress);
 
         if (currentPrice) {
           // Calculate current portfolio value
@@ -145,11 +158,26 @@ export class PaperTradingEngine {
       mergedConfig.initialBalanceUSDC
     );
 
-    // If initialBalanceTokens is provided, add a position for the token
+    // FIX #6: Initialize positions for sell strategies at session creation (not during first sell)
     const initialTokenBalance = (config as any)?.initialBalanceTokens || 0;
-    const tokenAddress = (config as any)?.tokenAddress || ENV_CONFIG.TOKEN_ADDRESS;
+    const tokenAddress = (config as any)?.tokenAddress; // FIX #5: No ENV_CONFIG fallback
+    const strategySide = (config as any)?.strategySide || 'buy'; // 'buy' or 'sell'
     
-    if (initialTokenBalance > 0) {
+    // FIX #5: Validate tokenAddress is provided (required for all strategies)
+    if (!tokenAddress || tokenAddress.length !== 44) {
+      console.error(`❌ [PaperTradingEngine] Invalid or missing tokenAddress: ${tokenAddress}`);
+      throw new Error(`tokenAddress is required for paper trading session creation. Received: ${tokenAddress}`);
+    }
+    
+    // Auto-initialize position for SELL strategies (reactive mirror strategies)
+    const shouldAutoInitForSellStrategy = initialTokenBalance === 0 && 
+                                         strategySide === 'sell' && 
+                                         tokenAddress;
+    
+    const effectiveTokenBalance = shouldAutoInitForSellStrategy ? 100000 : initialTokenBalance;
+    
+    if (effectiveTokenBalance > 0) {
+      console.log(`💰 [PaperTradingEngine] Initializing position: ${effectiveTokenBalance} tokens${shouldAutoInitForSellStrategy ? ' (auto-init for sell strategy)' : ''}`);
       const now = Date.now();
       
       // PRODUCTION: Fetch REAL current market price - NO FALLBACKS ALLOWED
@@ -193,8 +221,8 @@ export class PaperTradingEngine {
       console.log(`✅ [PRODUCTION] Price validation passed: $${priceUSD} USD (${marketPrice} SOL, SOL=$${solPriceUSD})`);
       
       // Calculate actual cost basis based on REAL current price
-      const costBasisSOL = initialTokenBalance * marketPrice; // Real SOL value
-      const costBasisUSD = initialTokenBalance * priceUSD; // Real USD value
+      const costBasisSOL = effectiveTokenBalance * marketPrice; // Real SOL value
+      const costBasisUSD = effectiveTokenBalance * priceUSD; // Real USD value
       
       // Create a mock buy trade to initialize the position properly
       const mockTrade: PaperTrade = {
@@ -213,14 +241,14 @@ export class PaperTradingEngine {
         priceUSD: priceUSD, // REAL current price in USD
         solPriceUSD: solPriceUSD, // REAL SOL price
         amountSOL: costBasisSOL, // Real SOL value of tokens
-        amountTokens: initialTokenBalance,
+        amountTokens: effectiveTokenBalance,
         tradingFee: 0,
         networkFee: 0,
         slippage: 0,
         totalCost: costBasisSOL,
         balanceSOL: mergedConfig.initialBalanceSOL, // Keep initial SOL unchanged (no actual purchase)
         balanceUSDC: mergedConfig.initialBalanceUSDC,
-        balanceTokens: initialTokenBalance,
+        balanceTokens: effectiveTokenBalance,
         realizedPnL: 0,
         trigger: 'initial_position',
       };
@@ -271,6 +299,7 @@ export class PaperTradingEngine {
 
   /**
    * Execute a paper buy order
+   * FIX #10: Added retry logic and better error handling for market data
    */
   async executeBuy(
     sessionId: string,
@@ -307,14 +336,29 @@ export class PaperTradingEngine {
     }
 
     try {
-      // Fetch real-time market data
-      const marketData = await marketDataProvider.fetchTokenPrice(tokenAddress);
+      // FIX #10: Fetch real-time market data with retry logic
+      let marketData = null;
+      let lastError = '';
+      const maxRetries = 3;
+      
+      for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+          marketData = await marketDataProvider.fetchTokenPrice(tokenAddress);
+          if (marketData) break;
+        } catch (error) {
+          lastError = error instanceof Error ? error.message : String(error);
+          console.warn(`[PaperTradingEngine] Market data fetch attempt ${attempt}/${maxRetries} failed: ${lastError}`);
+          if (attempt < maxRetries) {
+            await new Promise(resolve => setTimeout(resolve, 1000 * attempt)); // Exponential backoff
+          }
+        }
+      }
       
       if (!marketData) {
-        this.log(sessionId, 'error', 'Failed to fetch market data', { tokenAddress });
+        this.log(sessionId, 'error', 'Failed to fetch market data after retries', { tokenAddress, lastError });
         return {
           success: false,
-          error: 'Failed to fetch market data',
+          error: `Failed to fetch market data: ${lastError}. Please try again.`,
         };
       }
 
@@ -1410,14 +1454,29 @@ export class PaperTradingEngine {
     }
 
     try {
-      // Fetch real-time token price (in SOL)
-      const marketData = await marketDataProvider.fetchTokenPrice(tokenAddress);
+      // FIX #10: Fetch real-time token price with retry logic
+      let marketData = null;
+      let lastError = '';
+      const maxRetries = 3;
+      
+      for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+          marketData = await marketDataProvider.fetchTokenPrice(tokenAddress);
+          if (marketData) break;
+        } catch (error) {
+          lastError = error instanceof Error ? error.message : String(error);
+          console.warn(`[PaperTradingEngine] Market data fetch attempt ${attempt}/${maxRetries} failed: ${lastError}`);
+          if (attempt < maxRetries) {
+            await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
+          }
+        }
+      }
       
       if (!marketData) {
-        this.log(sessionId, 'error', 'Failed to fetch market data', { tokenAddress });
+        this.log(sessionId, 'error', 'Failed to fetch market data after retries', { tokenAddress, lastError });
         return {
           success: false,
-          error: 'Failed to fetch market data for token',
+          error: `Failed to fetch market data: ${lastError}. Please try again.`,
         };
       }
 
@@ -1584,34 +1643,158 @@ export class PaperTradingEngine {
       
       // Emit WebSocket event
       if (this.io) {
+        // FIX #2: Standardize event structure to match BUY events (comprehensive metrics, proper formatting)
+        const sessionDuration = (Date.now() - state.startTime) / 60000; // in minutes
+        const tradesPerMinute = sessionDuration > 0 ? state.trades.length / sessionDuration : 0;
+        const allocationPercentage = state.metrics.totalValueUSD > 0 
+          ? ((state.portfolio.balanceTokens * marketData.priceUSD) / state.metrics.totalValueUSD) * 100 
+          : 0;
+        
         const eventData = {
           sessionId,
           side: 'sell',
+          type: 'sell', // Add type for compatibility with frontend
           amount: tokensToSell, // Keep for backward compatibility
           amountTokens: tokensToSell, // Consistent naming with BUY
           amountSOL: solReceived,
-          price: basePrice,
-          priceUSD: marketData.priceUSD,
+          amountUSD: realizedPnLUSD, // USD value received (P&L)
+          price: basePrice, // Token price in SOL
+          priceUSD: marketData.priceUSD, // Token price in USD
           tokenSymbol: marketData.tokenSymbol || 'TOKEN', // Consistent with BUY event
           solPriceUSD: marketData.solPrice,
           baseToken: marketData.tokenSymbol || 'TOKEN',
           quoteToken: 'SOL',
-          pnl: realizedPnL,
-          pnlUSD: realizedPnLUSD,
+          pnl: realizedPnL, // Realized P&L in SOL
+          pnlUSD: realizedPnLUSD, // Realized P&L in USD
           timestamp: trade.timestamp,
+          executionTimeMs: Date.now() - trade.timestamp, // Execution latency
           tradeId: trade.id,
-          totalTrades: state.trades.length, // FIX: Include current trade count
-          fees: { 
-            tradingFee, 
-            networkFee, 
-            totalFees 
+          totalTrades: state.trades.length,
+          
+          // Enhanced fee breakdown (consistent with BUY)
+          fees: {
+            tradingFee: tradingFee,
+            tradingFeeUSD: tradingFee * marketData.solPrice,
+            networkFee: networkFee,
+            networkFeeUSD: networkFee * marketData.solPrice,
+            totalFees: totalFees,
+            totalFeesUSD: totalFees * marketData.solPrice,
+            feePercentage: (totalFees / solReceived) * 100
           },
-          slippage: slippageAmount * tokensToSell,
-          tokenAddress,
+          
+          // Slippage impact (consistent with BUY)
+          slippage: {
+            amount: slippageAmount,
+            amountUSD: slippageAmount * marketData.solPrice,
+            percentage: state.config.slippagePercentage,
+            impactOnPrice: (slippageAmount / basePrice) * 100
+          },
+          
+          // Position details (consistent with BUY)
+          position: {
+            tokenAddress: tokenAddress,
+            tokenSymbol: marketData.tokenSymbol || 'TOKEN',
+            size: state.portfolio.balanceTokens, // Remaining position
+            sizeUSD: state.portfolio.balanceTokens * marketData.priceUSD,
+            averageEntryPrice: position?.averageEntryPrice || basePrice,
+            costBasis: position?.totalInvestedSOL || 0,
+            costBasisUSD: position?.totalInvestedUSD || 0,
+            realizedPnL: realizedPnL,
+            realizedPnLUSD: realizedPnLUSD,
+            allocationPercentage: allocationPercentage,
+            totalPositionSize: state.portfolio.balanceTokens
+          },
+          
+          // Balance changes (consistent with BUY)
+          balanceDeltas: {
+            solDelta: solReceived - totalFees, // Positive (received SOL)
+            usdcDelta: 0,
+            tokenDelta: -tokensToSell, // Negative (sold tokens)
+            totalValueDelta: realizedPnLUSD
+          },
+          
+          // Current balances after trade (consistent with BUY)
+          balances: {
+            solBalance: state.portfolio.balanceSOL,
+            usdcBalance: state.portfolio.balanceUSDC,
+            tokenBalance: state.portfolio.balanceTokens,
+            totalValueUSD: state.metrics.totalValueUSD,
+            availableCash: state.portfolio.balanceSOL + state.portfolio.balanceUSDC / marketData.solPrice
+          },
+          
+          // Execution details (consistent with BUY)
+          execution: {
+            orderType: 'market',
+            requestedAmount: tokensToSell,
+            executedAmount: tokensToSell,
+            executionPrice: executionPrice,
+            marketPrice: basePrice,
+            priceDeviation: ((executionPrice - basePrice) / basePrice) * 100,
+            fillRate: 100
+          },
+          
+          // Trading velocity (consistent with BUY)
+          velocity: {
+            tradesPerMinute: tradesPerMinute,
+            sessionDuration: sessionDuration,
+            averageTradeInterval: sessionDuration > 0 ? sessionDuration / state.trades.length : 0
+          },
+          
+          strategyInfo: {
+            strategyId: strategyId,
+            strategyName: strategyName,
+            trigger: trigger
+          },
+          
+          // Comprehensive metrics (consistent with BUY)
+          metrics: {
+            totalTrades: state.metrics.totalTrades,
+            roi: state.metrics.roi,
+            totalPnLPercentage: state.metrics.totalPnLPercentage,
+            totalPnL: state.metrics.totalPnL,
+            totalPnLUSD: state.metrics.totalPnLUSD,
+            winRate: state.metrics.winRate,
+            profitFactor: state.metrics.profitFactor || 0,
+            sharpeRatio: state.metrics.sharpeRatio || 0,
+            maxDrawdown: state.metrics.maxDrawdown || 0,
+            averageWin: state.metrics.averageWin || 0,
+            averageLoss: state.metrics.averageLoss || 0,
+            winningTrades: state.metrics.winningTrades || 0,
+            losingTrades: state.metrics.losingTrades || 0,
+            totalFeesUSD: state.metrics.totalFeesUSD || 0,
+            executionsPerMin: state.metrics.duration > 0 
+              ? (state.metrics.totalTrades / (state.metrics.duration / 60000)) 
+              : 0,
+            realizedPnL: state.metrics.realizedPnL,
+            realizedPnLUSD: state.metrics.realizedPnLUSD
+          },
+          
+          // FLATTENED METRICS AT TOP LEVEL - for frontend compatibility (consistent with BUY)
+          winningTrades: state.metrics.winningTrades || 0,
+          losingTrades: state.metrics.losingTrades || 0,
+          winRate: state.metrics.winRate,
+          profitFactor: state.metrics.profitFactor || 0,
+          sharpeRatio: state.metrics.sharpeRatio || 0,
+          maxDrawdown: state.metrics.maxDrawdown || 0,
+          roi: state.metrics.roi,
+          avgWin: state.metrics.averageWin || 0,
+          avgLoss: state.metrics.averageLoss || 0,
+          tokenAddress: tokenAddress
         };
         
+        console.log('📡 Emitting paper:trade:executed (SELL TOKEN→SOL) - FLATTENED METRICS:', {
+          'TOP_LEVEL.winRate': eventData.winRate,
+          'TOP_LEVEL.profitFactor': eventData.profitFactor,
+          'TOP_LEVEL.sharpeRatio': eventData.sharpeRatio,
+          'NESTED.metrics.winRate': eventData.metrics.winRate,
+          'NESTED.metrics.profitFactor': eventData.metrics.profitFactor,
+          tokensToSell: tokensToSell.toFixed(4),
+          solReceived: solReceived.toFixed(6),
+          realizedPnL: realizedPnLUSD.toFixed(4)
+        });
+        
         this.io.emit('paper:trade:executed', eventData);
-        console.log(`📊 [PaperTradingEngine] Emitted trade execution to UI (total trades: ${state.trades.length})`);
+        console.log(`📊 [PaperTradingEngine] Emitted SELL TOKEN→SOL trade execution to UI (total trades: ${state.trades.length})`);
         
         const simulationData = {
           sessionId,

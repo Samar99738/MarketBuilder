@@ -43,10 +43,11 @@ export class RaydiumWebSocketListener extends EventEmitter {
     this.rpcUrl = rpcUrl;
     
     // Create WebSocket connection
+    // FIX #3: Use 'processed' commitment for minimal latency (~200-400ms vs 2-5s with 'confirmed')
     const wsUrl = rpcUrl.replace('https://', 'wss://').replace('http://', 'ws://');
     this.connection = new Connection(rpcUrl, {
       wsEndpoint: wsUrl,
-      commitment: 'confirmed'
+      commitment: 'processed' // FIX #3: Changed from 'confirmed' to 'processed' for <500ms latency
     });
     
     // Initialize pool discovery utility
@@ -147,12 +148,13 @@ export class RaydiumWebSocketListener extends EventEmitter {
       console.log(`🎯 [RaydiumWS] Also supports: Meteora, Orca (via pool address matching)`);
 
       // Subscribe to ALL logs from Raydium AMM V4 program
+      // FIX #3: Use 'processed' commitment for minimal latency (~200-400ms)
       this.subscriptionId = this.connection.onLogs(
         programId,
         (logs: Logs, context: Context) => {
           this.handleLogs(logs, context);
         },
-        'confirmed'
+        'processed' // FIX #3: Changed from 'confirmed' to 'processed' for <500ms latency
       );
 
       this.isMonitoring = true;
@@ -251,6 +253,8 @@ export class RaydiumWebSocketListener extends EventEmitter {
       }
 
       // Fetch full transaction to check which pool it belongs to
+      // FIX #3: Keep 'confirmed' for getParsedTransaction (API limitation - doesn't support 'processed')
+      // The latency improvement comes from WebSocket subscription using 'processed' commitment
       const tx = await this.connection.getParsedTransaction(signature, {
         maxSupportedTransactionVersion: 0,
         commitment: 'confirmed'

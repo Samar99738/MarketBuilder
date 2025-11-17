@@ -91,7 +91,8 @@ export function loadEnvironmentConfig(): EnvironmentConfig {
     WS_ENDPOINT: process.env.WS_ENDPOINT,
     
     // Trading (TOKEN_ADDRESS optional in MCP mode, will be provided per-tool call)
-    TOKEN_ADDRESS: process.env.TOKEN_ADDRESS || 'So11111111111111111111111111111111111111112', // Default to SOL
+    // FIX #5: No hardcoded fallback - tokenAddress MUST be provided by strategy or tool call for production
+    TOKEN_ADDRESS: process.env.TOKEN_ADDRESS || '',
     BUY_AMOUNT_SOL: parseFloat(process.env.BUY_AMOUNT_SOL || '0.1'),
     SLIPPAGE_BPS: parseInt(process.env.SLIPPAGE_BPS || '300'),
     MAX_SLIPPAGE_BPS: parseInt(process.env.MAX_SLIPPAGE_BPS || '1000'),
@@ -156,9 +157,12 @@ function validateConfiguration(config: EnvironmentConfig): void {
     }
   }
   
-  // Validate token address
-  if (config.TOKEN_ADDRESS.length !== 44) {
-    console.error('TOKEN_ADDRESS might not be a valid Solana address (expected 44 characters)');
+  // Validate token address (if provided)
+  // FIX #5: TOKEN_ADDRESS can be empty if provided at runtime (strategy/tool-level)
+  if (config.TOKEN_ADDRESS && config.TOKEN_ADDRESS.length !== 44) {
+    console.warn('TOKEN_ADDRESS might not be a valid Solana address (expected 44 characters)');
+  } else if (!config.TOKEN_ADDRESS) {
+    console.log('ℹ️ TOKEN_ADDRESS not set in environment - must be provided at runtime (strategy-level)');
   }
   
   // Validate RPC endpoint

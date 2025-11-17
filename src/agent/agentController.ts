@@ -787,6 +787,7 @@ export class AgentController {
    *  Check if strategy has all required configuration
    *  UNIVERSAL: Works with ALL strategy types by trusting AI's isComplete flag
    *  and doing smart validation based on what fields are present
+   *  FIX #1: Enhanced validation for DCA sell, reactive, and contrarian strategies
    */
   private isStrategyConfigComplete(strategy: ParsedStrategy): boolean {
     if (!strategy || !strategy.config) {
@@ -825,6 +826,31 @@ export class AgentController {
         // For custom strategies, check based on strategyType if available
         if (config.strategyType) {
           console.log(` [isStrategyConfigComplete] Custom strategy type: ${config.strategyType}`);
+          
+          // FIX #1: Enhanced validation for reactive strategies
+          if (config.strategyType === 'reactive') {
+            const hasReactiveFields = !!(
+              config.id &&
+              config.tokenAddress &&
+              config.trigger &&
+              config.side
+            );
+            console.log(` [isStrategyConfigComplete] Reactive validation: ${hasReactiveFields}`);
+            return hasReactiveFields;
+          }
+          
+          // FIX #1: Enhanced validation for contrarian_volatility strategies
+          if (config.strategyType === 'contrarian_volatility') {
+            const hasContrarianFields = !!(
+              config.tokenAddress &&
+              config.sellTriggerPercentage !== undefined &&
+              config.buyTriggerPercentage !== undefined &&
+              config.sellAmountTokens !== undefined &&
+              config.buyAmountSOL !== undefined
+            );
+            console.log(` [isStrategyConfigComplete] Contrarian validation: ${hasContrarianFields}`);
+            return hasContrarianFields;
+          }
           
           // Universal validation: Does it have the basic fields needed for ANY strategy?
           const hasBasicFields = !!(
@@ -879,18 +905,20 @@ export class AgentController {
         return hasDescription && hasComponents;
         
       case 'dca':
-        // amount (buyAmountSOL or sellAmountSOL), interval, and side
+        // FIX #1: Enhanced DCA validation for both BUY and SELL sides
         const hasDCAAmount = (config.buyAmountSOL && config.buyAmountSOL > 0) ||
           (config.sellAmountSOL && config.sellAmountSOL > 0);
         const hasDCAInterval = config.intervalMinutes && config.intervalMinutes > 0;
         const hasDCASide = config.side === 'buy' || config.side === 'sell';
+        const hasDCAToken = !!config.tokenAddress;
         
-        const isDCAComplete = hasDCAAmount && hasDCAInterval && hasDCASide;
+        const isDCAComplete = hasDCAAmount && hasDCAInterval && hasDCASide && hasDCAToken;
 
         console.log(' DCA completeness check:', {
           hasDCAAmount,
           hasDCAInterval,
           hasDCASide,
+          hasDCAToken,
           isDCAComplete,
           buyAmount: config.buyAmountSOL,
           sellAmount: config.sellAmountSOL,
