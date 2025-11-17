@@ -35,8 +35,12 @@ export class RaydiumWebSocketListener extends EventEmitter {
   private readonly POOL_INACTIVITY_TIMEOUT = 30000; // 30 seconds
   private reconnectTimer: NodeJS.Timeout | null = null;
   private reconnectAttempts = 0;
-  private maxReconnectAttempts = 5;
+  private maxReconnectAttempts = 10;
   private rpcUrl: string;
+  private healthCheckInterval: NodeJS.Timeout | null = null;
+  private lastActivityTimestamp: number = Date.now();
+  private readonly HEALTH_CHECK_INTERVAL_MS = 30000; // Check every 30 seconds
+  private readonly MAX_INACTIVITY_MS = 120000; // 2 minutes without activity = reconnect
 
   constructor(rpcUrl: string) {
     super();
@@ -65,7 +69,7 @@ export class RaydiumWebSocketListener extends EventEmitter {
     if (typeof tokenAddressOrPoolInfo === 'string') {
       // Token address provided - discover pool
       const tokenAddress = tokenAddressOrPoolInfo;
-      console.log(`🌊 [RaydiumWS] Starting monitoring for token: ${tokenAddress.substring(0, 8)}...`);
+      console.log(`\n🌊 [RaydiumWS] Starting monitoring for token: ${tokenAddress}`);
 
       // Find Raydium pool for this token
       console.log(`🔍 [RaydiumWS] Calling PoolDiscovery.findPoolForToken...`);
@@ -82,16 +86,36 @@ export class RaydiumWebSocketListener extends EventEmitter {
         throw new Error(`No Raydium pool found for token ${tokenAddress}. Check logs above for details.`);
       }
 
-      console.log(`✅ [RaydiumWS] Pool discovered successfully:`);
-      console.log(`   Pool Address: ${discovered.poolAddress.substring(0, 12)}...`);
-      console.log(`   Token Mint: ${discovered.tokenMint.substring(0, 12)}...`);
+      console.log(`\n✅ [RaydiumWS] ==================== POOL DISCOVERED ====================`);
+      console.log(`   Token Address: ${discovered.tokenMint}`);
+      console.log(`   Pool Address:  ${discovered.poolAddress}`);
+      console.log(`   Base Mint:     ${discovered.baseMint}`);
+      console.log(`   Quote Mint:    ${discovered.quoteMint}`);
+      console.log(`================================================================\n`);
 
       poolInfo = discovered;
-      console.log(`✅ [RaydiumWS] Found pool: ${poolInfo.poolAddress.substring(0, 8)}...`);
     } else {
       // PoolInfo provided directly - use it
       poolInfo = tokenAddressOrPoolInfo;
-      console.log(`🌊 [RaydiumWS] Starting monitoring for pool: ${poolInfo.poolAddress.substring(0, 8)}...`);
+      console.log(`\n🌊 [RaydiumWS] Starting monitoring for pool: ${poolInfo.poolAddress}`);
+      console.log(`   Token: ${poolInfo.tokenMint}\n`);
+    }
+
+    // CRITICAL FIX: Check if we're already monitoring this pool
+    if (this.monitoredPools.has(poolInfo.poolAddress)) {
+      console.log(`⚠️ [RaydiumWS] Already monitoring pool ${poolInfo.poolAddress.substring(0, 8)}... - skipping duplicate`);
+      return;
+    }
+
+    // CRITICAL FIX: Check if we're monitoring a different token and should stop it
+    // (This happens when user switches tokens in the UI)
+    for (const [existingPoolAddress, existingPoolInfo] of this.monitoredPools.entries()) {
+      if (existingPoolInfo.tokenMint !== poolInfo.tokenMint) {
+        console.log(`⚠️ [RaydiumWS] Switching from ${existingPoolInfo.tokenMint.substring(0, 8)}... to ${poolInfo.tokenMint.substring(0, 8)}...`);
+        console.log(`   Removing old pool: ${existingPoolAddress.substring(0, 8)}...`);
+        this.monitoredPools.delete(existingPoolAddress);
+        this.poolActivityTracker.delete(existingPoolAddress);
+      }
     }
 
     // Store pool info
@@ -103,7 +127,13 @@ export class RaydiumWebSocketListener extends EventEmitter {
       matchCount: 0
     });
 
-    console.log(`📊 [RaydiumWS] Now monitoring ${this.monitoredPools.size} pool(s)`);
+    console.log(`\n🎯 [RaydiumWS] ======================== MONITORING ACTIVE ========================`);
+    console.log(`   Token Being Monitored: ${poolInfo.tokenMint}`);
+    console.log(`   Pool Being Watched:    ${poolInfo.poolAddress}`);
+    console.log(`   Total Pools Monitored: ${this.monitoredPools.size}`);
+    console.log(`   ⚠️  CRITICAL: Transactions MUST contain BOTH pool AND token to match!`);
+    console.log(`========================================================================\n`);
+    
     console.log(`⏱️ [RaydiumWS] Will check pool activity... If no swaps detected in 30s, pool might be inactive`);
 
     // Subscribe to program logs if not already subscribed
@@ -135,32 +165,49 @@ export class RaydiumWebSocketListener extends EventEmitter {
 
   /**
    * Subscribe to DEX program logs (Raydium, Meteora, Orca)
-   * PRODUCTION FIX: Multi-DEX support for all Solana pools
+   * CRITICAL FIX: Subscribe to specific pool address instead of entire program
+   * This reduces noise from 1000+ tx/sec to only relevant pool transactions
    */
   private async subscribe(): Promise<void> {
     try {
-      // PRODUCTION FIX: Subscribe to multiple DEX programs for comprehensive coverage
-      // We'll subscribe to Raydium first, then add Meteora/Orca in separate listeners
-      const programId = new PublicKey(RAYDIUM_AMM_V4_PROGRAM_ID);
-
       console.log(`🔌 [RaydiumWS] Connecting to Solana WebSocket...`);
-      console.log(`🎯 [RaydiumWS] Monitoring program: ${RAYDIUM_AMM_V4_PROGRAM_ID}`);
-      console.log(`🎯 [RaydiumWS] Also supports: Meteora, Orca (via pool address matching)`);
+      
+      // CRITICAL FIX: Subscribe to SPECIFIC POOL ADDRESS instead of entire program
+      // This filters transactions at the RPC level, not client-side
+      if (this.monitoredPools.size === 0) {
+        console.warn(`⚠️ [RaydiumWS] No pools to monitor - skipping subscription`);
+        return;
+      }
 
-      // Subscribe to ALL logs from Raydium AMM V4 program
-      // FIX #3: Use 'processed' commitment for minimal latency (~200-400ms)
+      // Get the first pool address (we're monitoring one pool at a time in this implementation)
+      const poolAddress = Array.from(this.monitoredPools.keys())[0];
+      const poolInfo = this.monitoredPools.get(poolAddress)!;
+      
+      console.log(`🎯 [RaydiumWS] Subscribing to SPECIFIC POOL: ${poolAddress}`);
+      console.log(`🎯 [RaydiumWS] Token: ${poolInfo.tokenMint}`);
+      console.log(`🎯 [RaydiumWS] This will ONLY receive transactions involving this pool`);
+
+      // Subscribe to logs mentioning the specific pool address
+      // This is MUCH more efficient than subscribing to the entire Raydium program
+      const poolPubkey = new PublicKey(poolAddress);
+      
       this.subscriptionId = this.connection.onLogs(
-        programId,
+        poolPubkey, // Subscribe to pool, not program!
         (logs: Logs, context: Context) => {
           this.handleLogs(logs, context);
         },
-        'processed' // FIX #3: Changed from 'confirmed' to 'processed' for <500ms latency
+        'processed' // Use 'processed' for minimal latency
       );
 
       this.isMonitoring = true;
       this.reconnectAttempts = 0;
+      this.lastActivityTimestamp = Date.now();
       console.log(`✅ [RaydiumWS] Connected! Subscription ID: ${this.subscriptionId}`);
-      console.log(`🎧 [RaydiumWS] Listening for swaps on ${this.monitoredPools.size} pool(s)`);
+      console.log(`🎧 [RaydiumWS] Listening for swaps on pool: ${poolAddress.substring(0, 8)}...`);
+      console.log(`📊 [RaydiumWS] Token being tracked: ${poolInfo.tokenMint.substring(0, 8)}...`);
+
+      // Start health monitoring
+      this.startHealthMonitoring();
 
       // Emit connection event
       this.emit('connected');
@@ -181,6 +228,9 @@ export class RaydiumWebSocketListener extends EventEmitter {
    */
   private handleLogs(logs: Logs, context: Context): void {
     try {
+      // Update activity timestamp - connection is alive
+      this.lastActivityTimestamp = Date.now();
+      
       const signature = logs.signature;
       if (!signature) return;
 
@@ -225,7 +275,7 @@ export class RaydiumWebSocketListener extends EventEmitter {
 
   /**
    * Process a potential Raydium transaction
-   * PRODUCTION FIX: Enhanced with deduplication, better error handling, and comprehensive logging
+   * Enhanced with deduplication, better error handling, and comprehensive logging
    */
   private processedSignatures: Set<string> = new Set(); // Prevent duplicate processing
   private readonly MAX_PROCESSED_SIGNATURES = 1000; // Limit memory usage
@@ -236,7 +286,7 @@ export class RaydiumWebSocketListener extends EventEmitter {
     context: Context
   ): Promise<void> {
     try {
-      // PRODUCTION FIX: Prevent duplicate transaction processing
+      // Prevent duplicate transaction processing
       if (this.processedSignatures.has(signature)) {
         return; // Already processed this transaction
       }
@@ -244,7 +294,7 @@ export class RaydiumWebSocketListener extends EventEmitter {
       // Add to processed set
       this.processedSignatures.add(signature);
       
-      // PRODUCTION FIX: Clean up old signatures to prevent memory leak
+      // Clean up old signatures to prevent memory leak
       if (this.processedSignatures.size > this.MAX_PROCESSED_SIGNATURES) {
         const firstSignature = this.processedSignatures.values().next().value;
         if (firstSignature) {
@@ -287,7 +337,7 @@ export class RaydiumWebSocketListener extends EventEmitter {
       let foundMatch = false;
       
       for (const [poolAddress, poolInfo] of this.monitoredPools.entries()) {
-        // PRODUCTION FIX: Check MULTIPLE ways to match transactions
+        // Check MULTIPLE ways to match transactions
         // 1. Check account keys (pool address)
         // 2. Check token mint in account keys  
         // 3. Check token mint in preTokenBalances/postTokenBalances (CRITICAL for Jupiter/aggregator swaps)
@@ -299,8 +349,22 @@ export class RaydiumWebSocketListener extends EventEmitter {
         // Method 1: Direct pool address match
         const poolMatch = allAccounts.includes(poolAddress);
         
+        if (poolMatch) {
+          console.log(`\n✅✅✅ [RaydiumWS] POOL ADDRESS MATCH! ✅✅✅`);
+          console.log(`   Pool: ${poolAddress}`);
+          console.log(`   Token: ${poolInfo.tokenMint}`);
+        } else {
+          console.log(`⚠️ [RaydiumWS] Pool NOT in transaction`);
+          console.log(`   Looking for pool: ${poolAddress}`);
+          console.log(`   Transaction accounts (first 10): ${allAccounts.slice(0, 10).map(a => a?.substring(0, 8)).join(', ')}...`);
+        }
+        
         // Method 2: Direct token mint match in accounts
         const tokenMatch = allAccounts.includes(poolInfo.tokenMint);
+        
+        if (tokenMatch) {
+          console.log(`✅ [RaydiumWS] Token mint MATCH! ${poolInfo.tokenMint.substring(0, 8)}... found in transaction`);
+        }
         
         // Method 3: Check token mint in balance changes (WORKS FOR ALL DEX SWAPS)
         let tokenBalanceMatch = false;
@@ -323,10 +387,25 @@ export class RaydiumWebSocketListener extends EventEmitter {
             console.log(`🔍 [RaydiumWS] Checking ${signature.substring(0, 12)}... - ${allTokenMints.length} token(s) found`);
             console.log(`   Target: ${poolInfo.tokenMint}`);
             console.log(`   Found: ${allTokenMints.join(', ')}`);
+            
+            // CRITICAL: Emit heartbeat for wrong token transactions
+            // This keeps the health check alive even when all transactions are filtered out
+            console.log(`💓 [RaydiumWS] Heartbeat - Transaction processed but token not matched`);
+            this.emit('heartbeat', {
+              processed: true,
+              matched: false,
+              reason: 'token_not_in_transaction',
+              expected: poolInfo.tokenMint,
+              found: allTokenMints
+            });
           }
         }
         
-        const poolInvolved = poolMatch || tokenMatch || tokenBalanceMatch;
+        // Must check BOTH pool address AND token presence!
+        // Pool address alone is not enough (many pools use same program)
+        // Token alone is not enough (could be in a different pool)
+        // BOTH must match for this transaction to be relevant!
+        const poolInvolved = poolMatch && (tokenMatch || tokenBalanceMatch);
         
         // Success logging
         if (poolInvolved) {
@@ -353,7 +432,7 @@ export class RaydiumWebSocketListener extends EventEmitter {
         }
       }
       
-      // PRODUCTION FIX: Check for inactive pools periodically
+      // Check for inactive pools periodically
       if (!foundMatch && this.monitoredPools.size > 0) {
         for (const [poolAddress, poolInfo] of this.monitoredPools.entries()) {
           const tracker = this.poolActivityTracker.get(poolAddress);
@@ -400,9 +479,17 @@ export class RaydiumWebSocketListener extends EventEmitter {
         user: transfers.user.substring(0, 8) + '...'
       });
 
+      // CRITICAL FIX: Verify the token in the transaction matches our monitored token
+      // Only emit if the specific token we're monitoring was involved
+      if (transfers.actualTokenMint && transfers.actualTokenMint.toLowerCase() !== poolInfo.tokenMint.toLowerCase()) {
+        console.log(`⚠️ [RaydiumWS] Token mismatch - Expected: ${poolInfo.tokenMint.substring(0, 8)}..., Got: ${transfers.actualTokenMint.substring(0, 8)}...`);
+        console.log(`🔇 [RaydiumWS] Ignoring trade for different token in same pool`);
+        return;
+      }
+
       const trade: RaydiumTradeEvent = {
         poolAddress,
-        tokenMint: poolInfo.tokenMint,
+        tokenMint: poolInfo.tokenMint, // Always use the monitored token mint
         solAmount: transfers.solAmount,
         tokenAmount: transfers.tokenAmount,
         isBuy: transfers.isBuy,
@@ -440,6 +527,7 @@ export class RaydiumWebSocketListener extends EventEmitter {
     tokenAmount: number;
     isBuy: boolean;
     user: string;
+    actualTokenMint: string | null;
   } | null {
     try {
       const meta = tx.meta;
@@ -452,26 +540,62 @@ export class RaydiumWebSocketListener extends EventEmitter {
       let tokenAmount = 0;
       let userAccount = '';
       let tokenIncreased = false; // Track direction of token change
+      let actualTokenMint: string | null = null; // Track which token was actually traded
 
-      // Find token mint balance changes (for the specific token we're monitoring)
+      // Find the ACTUAL token being traded (largest balance change)
+      // Then validate if it matches our monitored token
       for (const pre of preTokenBalances) {
-        if (pre.mint === poolInfo.tokenMint) {
-          const post = postTokenBalances.find((p: any) => 
-            p.accountIndex === pre.accountIndex && p.mint === pre.mint
-          );
+        // Process ALL token mints to find which one is actually being traded
+        const post = postTokenBalances.find((p: any) => 
+          p.accountIndex === pre.accountIndex && p.mint === pre.mint
+        );
 
-          if (post) {
-            const preAmount = parseFloat(pre.uiTokenAmount.uiAmountString || '0');
-            const postAmount = parseFloat(post.uiTokenAmount.uiAmountString || '0');
-            const change = Math.abs(postAmount - preAmount);
-            
-            if (change > tokenAmount) {
-              tokenAmount = change;
-              tokenIncreased = postAmount > preAmount; // TRUE if user received tokens (BUY)
-              userAccount = pre.owner || post.owner || '';
-            }
+        if (post) {
+          const preAmount = parseFloat(pre.uiTokenAmount.uiAmountString || '0');
+          const postAmount = parseFloat(post.uiTokenAmount.uiAmountString || '0');
+          const change = Math.abs(postAmount - preAmount);
+          
+          // Find the token with the LARGEST change (that's the one being traded)
+          if (change > tokenAmount) {
+            tokenAmount = change;
+            tokenIncreased = postAmount > preAmount; // TRUE if user received tokens (BUY)
+            userAccount = pre.owner || post.owner || '';
+            actualTokenMint = pre.mint; // Store the actual token mint that was traded
           }
         }
+      }
+
+      // CRITICAL VALIDATION: Verify the token traded matches our monitored token
+      if (actualTokenMint && actualTokenMint.toLowerCase() !== poolInfo.tokenMint.toLowerCase()) {
+        console.log(`⚠️ [RaydiumWS] parseTransfers - Token mismatch detected!`);
+        console.log(`   Expected: ${poolInfo.tokenMint.substring(0, 8)}...`);
+        console.log(`   Found: ${actualTokenMint.substring(0, 8)}...`);
+        console.log(`   🚫 Rejecting transaction - wrong token`);
+        
+        // Emit heartbeat to show listener is alive (even though trade is rejected)
+        this.emit('heartbeat', { 
+          processed: true, 
+          matched: false, 
+          reason: 'token_mismatch',
+          expected: poolInfo.tokenMint,
+          found: actualTokenMint
+        });
+        
+        return null; // Wrong token - don't process this transaction
+      }
+
+      // If no token mint found at all, reject
+      if (!actualTokenMint) {
+        console.log(`⚠️ [RaydiumWS] parseTransfers - No token mint found in transaction`);
+        
+        // Emit heartbeat to show listener is alive
+        this.emit('heartbeat', { 
+          processed: true, 
+          matched: false, 
+          reason: 'no_token_found'
+        });
+        
+        return null;
       }
 
       // Get SOL balance changes (lamports to SOL)
@@ -529,7 +653,8 @@ export class RaydiumWebSocketListener extends EventEmitter {
           solAmount,
           tokenAmount,
           isBuy,
-          user: userAccount || 'unknown'
+          user: userAccount || 'unknown',
+          actualTokenMint
         };
       }
 
@@ -541,10 +666,92 @@ export class RaydiumWebSocketListener extends EventEmitter {
   }
 
   /**
+   * Start health monitoring to detect silent disconnections
+   */
+  private startHealthMonitoring(): void {
+    // Clear any existing interval
+    if (this.healthCheckInterval) {
+      clearInterval(this.healthCheckInterval);
+    }
+
+    this.healthCheckInterval = setInterval(() => {
+      this.checkConnectionHealth();
+    }, this.HEALTH_CHECK_INTERVAL_MS);
+
+    console.log(`💓 [RaydiumWS] Health monitoring started (checking every ${this.HEALTH_CHECK_INTERVAL_MS / 1000}s)`);
+  }
+
+  /**
+   * Stop health monitoring
+   */
+  private stopHealthMonitoring(): void {
+    if (this.healthCheckInterval) {
+      clearInterval(this.healthCheckInterval);
+      this.healthCheckInterval = null;
+      console.log(`💓 [RaydiumWS] Health monitoring stopped`);
+    }
+  }
+
+  /**
+   * Check if WebSocket connection is still alive
+   * Reconnect if no activity detected for MAX_INACTIVITY_MS
+   */
+  private checkConnectionHealth(): void {
+    const timeSinceLastActivity = Date.now() - this.lastActivityTimestamp;
+    const minutesSinceActivity = Math.floor(timeSinceLastActivity / 60000);
+
+    if (timeSinceLastActivity > this.MAX_INACTIVITY_MS && this.isMonitoring) {
+      console.error(`❌ [RaydiumWS] CONNECTION DEAD - No activity for ${minutesSinceActivity} minutes`);
+      console.error(`❌ [RaydiumWS] WebSocket silently died - forcing reconnection...`);
+      
+      // Emit connection stale event
+      this.emit('connection_stale', {
+        minutesSinceActivity,
+        monitoredTokens: this.getMonitoredTokens()
+      });
+
+      // Force reconnection
+      this.forceReconnect();
+    } else {
+      // Connection is healthy
+      const secondsSinceActivity = Math.floor(timeSinceLastActivity / 1000);
+      console.log(`💓 [RaydiumWS] Health check - Connection alive (last activity: ${secondsSinceActivity}s ago)`);
+    }
+  }
+
+  /**
+   * Force reconnection (hard reset)
+   */
+  private async forceReconnect(): Promise<void> {
+    console.log(`🔄 [RaydiumWS] FORCE RECONNECTING...`);
+    
+    // Store current monitored pools
+    const poolsToRestore = new Map(this.monitoredPools);
+    
+    // Stop current connection
+    await this.stop();
+    
+    // Wait a bit before reconnecting
+    await new Promise(resolve => setTimeout(resolve, 2000));
+    
+    // Restore monitored pools
+    this.monitoredPools = poolsToRestore;
+    
+    // Re-subscribe
+    if (this.monitoredPools.size > 0) {
+      console.log(`🔄 [RaydiumWS] Restoring ${this.monitoredPools.size} monitored pool(s)`);
+      await this.subscribe();
+    }
+  }
+
+  /**
    * Stop all monitoring and close WebSocket connection
    */
   async stop(): Promise<void> {
     console.log('[RaydiumWS] Stopping...');
+
+    // Stop health monitoring
+    this.stopHealthMonitoring();
 
     // Clear reconnect timer
     if (this.reconnectTimer) {

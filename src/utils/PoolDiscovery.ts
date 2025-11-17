@@ -50,7 +50,20 @@ export class PoolDiscovery {
     const cached = this.getFromCache(tokenMint);
     if (cached) {
       console.log(`💾 [PoolDiscovery] Using cached pool for ${tokenMint.substring(0, 8)}...`);
-      return cached;
+      console.log(`   ⚠️ CRITICAL CHECK: Cached token ${cached.tokenMint} === Requested ${tokenMint} ? ${cached.tokenMint === tokenMint}`);
+      
+      // CRITICAL FIX: Verify cached pool actually contains the requested token
+      if (cached.tokenMint.toLowerCase() !== tokenMint.toLowerCase()) {
+        console.error(`❌ [PoolDiscovery] CACHE CORRUPTION! Cached pool is for DIFFERENT token!`);
+        console.error(`   Requested: ${tokenMint}`);
+        console.error(`   Cached:    ${cached.tokenMint}`);
+        console.error(`   Clearing corrupt cache entry...`);
+        this.cache.delete(tokenMint);
+        this.cacheExpiry.delete(tokenMint);
+        // Continue to fresh pool discovery below
+      } else {
+        return cached;
+      }
     }
 
     console.log(`🔍 [PoolDiscovery] Searching for pool: ${tokenMint.substring(0, 8)}...`);
@@ -267,9 +280,23 @@ export class PoolDiscovery {
       console.log(`   24h Volume: $${pool.volume?.h24?.toLocaleString() || '0'}`);
       console.log(`   24h Txns: ${pool.txns?.h24?.buys || 0} buys, ${pool.txns?.h24?.sells || 0} sells`);
       console.log(`   🔍 DEBUG Pool Structure:`);
-      console.log(`      Base Token: ${pool.baseToken.address}`);
-      console.log(`      Quote Token: ${pool.quoteToken.address}`);
+      console.log(`      Base Token: ${pool.baseToken.address} (${pool.baseToken.symbol || 'UNKNOWN'})`);
+      console.log(`      Quote Token: ${pool.quoteToken.address} (${pool.quoteToken.symbol || 'UNKNOWN'})`);
       console.log(`      Target Token: ${tokenMint}`);
+      
+      // CRITICAL FIX: Verify the target token is actually in this pool!
+      const targetIsBase = pool.baseToken.address.toLowerCase() === tokenMint.toLowerCase();
+      const targetIsQuote = pool.quoteToken.address.toLowerCase() === tokenMint.toLowerCase();
+      
+      if (!targetIsBase && !targetIsQuote) {
+        console.error(`❌ [PoolDiscovery] CRITICAL ERROR: Target token NOT found in pool!`);
+        console.error(`   Pool contains: ${pool.baseToken.address} + ${pool.quoteToken.address}`);
+        console.error(`   But we're looking for: ${tokenMint}`);
+        console.error(`   🚫 This pool is WRONG - skipping it`);
+        return null;
+      }
+      
+      console.log(`   ✅ VERIFIED: Target token IS in pool (${targetIsBase ? 'baseToken' : 'quoteToken'})`);
       
       // PRODUCTION FIX: Warn if pool has no recent activity
       const has24hActivity = (pool.txns?.h24?.buys || 0) + (pool.txns?.h24?.sells || 0) > 0;
@@ -278,22 +305,24 @@ export class PoolDiscovery {
         console.warn(`   This pool might be inactive or abandoned. Trades may not be detected.`);
       }
       
-      // CRITICAL FIX: Determine baseMint and quoteMint correctly
-      // The token we're monitoring should be the baseMint, SOL should be quoteMint
-      const isBaseToken = pool.baseToken.address === tokenMint;
-      const baseMint = isBaseToken ? pool.baseToken.address : pool.quoteToken.address;
-      const quoteMint = isBaseToken ? pool.quoteToken.address : pool.baseToken.address;
+      // CRITICAL FIX: Always use TARGET token as tokenMint in PoolInfo
+      // This ensures Raydium listener checks for the correct token in transactions!
+      const baseMint = targetIsBase ? pool.baseToken.address : pool.quoteToken.address;
+      const quoteMint = targetIsBase ? pool.quoteToken.address : pool.baseToken.address;
       
-      console.log(`   ✅ Determined: baseMint=${baseMint.substring(0, 8)}... (target token)`);
-      console.log(`   ✅ Determined: quoteMint=${quoteMint.substring(0, 8)}... (${quoteMint === NATIVE_SOL_MINT ? 'SOL' : 'other'})`);
+      console.log(`   ✅ Pool Configuration:`);
+      console.log(`      poolAddress: ${pool.pairAddress}`);
+      console.log(`      tokenMint (MONITORED): ${tokenMint.substring(0, 8)}... ← ${targetIsBase ? pool.baseToken.symbol : pool.quoteToken.symbol}`);
+      console.log(`      baseMint: ${baseMint.substring(0, 8)}... ← ${pool.baseToken.symbol}`);
+      console.log(`      quoteMint: ${quoteMint.substring(0, 8)}... ← ${pool.quoteToken.symbol} ${quoteMint === NATIVE_SOL_MINT ? '(SOL)' : ''}`);
       
       return {
         poolAddress: pool.pairAddress,
-        tokenMint: tokenMint,
+        tokenMint: tokenMint, // THIS MUST BE THE TARGET TOKEN!
         baseMint: baseMint,
         quoteMint: quoteMint,
-        baseDecimals: isBaseToken ? (pool.info?.baseDecimals || 6) : (pool.info?.quoteDecimals || 6),
-        quoteDecimals: quoteMint === NATIVE_SOL_MINT ? 9 : 6
+        baseDecimals: targetIsBase ? (pool.info?.baseDecimals || 6) : (pool.info?.quoteDecimals || 6),
+        quoteDecimals: targetIsBase ? (pool.info?.quoteDecimals || 9) : (pool.info?.baseDecimals || 6)
       };
     } catch (error) {
       console.error(`❌ [PoolDiscovery] DexScreener search failed:`, error instanceof Error ? error.message : error);
