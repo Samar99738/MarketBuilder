@@ -246,14 +246,21 @@ export class StrategyExecutionManager {
         }
       }
       
-      // FALLBACK: If tokenAddress is still SOL default and strategy config has a tokenAddress, use it
+      // FALLBACK 1: If tokenAddress is still SOL default and strategy config has a tokenAddress, use it
       if ((!tokenAddress || tokenAddress === 'So11111111111111111111111111111111111111112') && (strategy as any).tokenAddress) {
         console.log(`[StrategyExecutionManager] Using tokenAddress from strategy config: ${(strategy as any).tokenAddress}`);
         tokenAddress = (strategy as any).tokenAddress;
       }
       
-      console.log(`[StrategyExecutionManager] Token address for session: ${tokenAddress || 'using ENV default'}`);
+      // FALLBACK 2: Check strategy.variables.tokenAddress as additional fallback
+      if ((!tokenAddress || tokenAddress === 'So11111111111111111111111111111111111111112') && strategy.variables?.tokenAddress) {
+        console.log(`[StrategyExecutionManager] Using tokenAddress from strategy.variables: ${strategy.variables.tokenAddress}`);
+        tokenAddress = strategy.variables.tokenAddress;
+      }
+      
+      console.log(`[StrategyExecutionManager] Token address for session: ${tokenAddress || 'MISSING - will fail!'}`);
       console.log(`[StrategyExecutionManager] Strategy tokenAddress: ${(strategy as any).tokenAddress}`);
+      console.log(`[StrategyExecutionManager] Strategy variables.tokenAddress: ${strategy.variables?.tokenAddress}`);
       console.log(`[StrategyExecutionManager] Is SOL address: ${tokenAddress === 'So11111111111111111111111111111111111111112'}`);
       
       const initialConfig = {

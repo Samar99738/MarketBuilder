@@ -30,7 +30,6 @@ import { Tool } from '@google/generative-ai';
 import type { Server as SocketServer } from 'socket.io';
 
 
-
 export interface AgentSession {
   sessionId: string;
   conversationHistory: ChatMessage[];
@@ -633,14 +632,24 @@ export class AgentController {
             console.log(` [UPDATE] Updated current strategy: ${parsedStrategy.template}`);
             
             // Check if strategy is COMPLETE
-            const isComplete = this.isStrategyConfigComplete(parsedStrategy);
+            let isComplete = this.isStrategyConfigComplete(parsedStrategy);
             console.log(` [COMPLETENESS] Strategy complete: ${isComplete}`, {
               template: parsedStrategy.template,
               hasTokenAddress: !!parsedStrategy.config.tokenAddress,
+              tokenAddress: parsedStrategy.config.tokenAddress,
               hasTrigger: !!parsedStrategy.config.trigger,
               hasSide: !!parsedStrategy.config.side,
               isMarkedComplete: parsedStrategy.config.isComplete
             });
+            
+            // Additional validation for reactive strategies - MUST have tokenAddress
+            if (isComplete && parsedStrategy.config.strategyType === 'reactive') {
+              if (!parsedStrategy.config.tokenAddress) {
+                console.error(`❌ [VALIDATION] Reactive strategy missing tokenAddress!`);
+                console.error(`❌ [VALIDATION] Config:`, JSON.stringify(parsedStrategy.config, null, 2));
+                isComplete = false;
+              }
+            }
             
             // If complete, AUTO-START simulation
             if (isComplete) {
@@ -2726,6 +2735,11 @@ Transaction ID: \`${data.transaction}\`
     console.log(` [SIMULATION] Strategy config:`, JSON.stringify(strategy.config, null, 2));
     
     try {
+      // Update session.surrrentStrategy Before executeStrategy
+      const session = this.getSession(sessionId);
+      session.currentStrategy = strategy;
+      console.log(` [SIMULATION] Updated session currentStrategy with provided strategy`);
+
       // Create paper trading session
       const paperSessionId = `paper-ui-${sessionId}-${Date.now()}`;
       console.log(` [SIMULATION] Created paper session ID: ${paperSessionId}`);

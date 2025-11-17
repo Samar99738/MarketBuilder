@@ -2168,40 +2168,10 @@
                         }
                     }
 
-                    // No active session, create new one
-                    const newSessionId = `paper-ui-${Date.now()}`;
-                    const response = await fetch('/api/v1/paper-trading/sessions', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            sessionId: newSessionId,
-                            userId: walletAddress || 'anonymous',
-                            strategyId: null,
-                            config: {
-                                initialBalanceSOL: 10.0,
-                                initialBalanceUSDC: 1000.0, // User starts with $1000 USD
-                                enableSlippage: true,
-                                slippageBps: 50,
-                                enableFees: true,
-                                takerFeeBps: 25,
-                                makerFeeBps: 0,
-                                priceImpactBps: 10
-                            }
-                        })
-                    });
-
-                    if (!response.ok) {
-                        const errorData = await response.json();
-                        throw new Error(`Failed to create paper session: ${errorData.error || response.statusText}`);
-                    }
-
-                    const data = await response.json();
-                    currentPaperSessionId = data.data.session.sessionId;
-                    localStorage.setItem('paperSessionId', currentPaperSessionId);
-
-                    console.log('✅ Created new paper session:', currentPaperSessionId);
-                    updatePaperTradingMetrics(data.data.session);
-                    startPaperMetricsPolling();
+                    // No active session - don't create one automatically
+                    // Paper trading sessions should only be created when a strategy is started
+                    console.log('ℹ️ No active paper trading session. Session will be created when strategy starts.');
+                    return;
 
                 } catch (error) {
                     console.error('❌ Failed to load paper session:', error);
@@ -2230,10 +2200,13 @@
                     localStorage.removeItem('paperSessionId');
                     currentPaperSessionId = null;
 
-                    // Create new session
-                    await loadPaperTradingSession();
+                    // Clear metrics display
+                    if (paperMetricsInterval) {
+                        clearInterval(paperMetricsInterval);
+                        paperMetricsInterval = null;
+                    }
 
-                    showNotification('✅ Paper trading session reset successfully!', 'success');
+                    showNotification('✅ Paper trading session cleared. New session will be created when you start a strategy.', 'success');
                 } catch (error) {
                     console.error('❌ Failed to reset paper session:', error);
                     showNotification('Failed to reset paper trading session', 'error');
