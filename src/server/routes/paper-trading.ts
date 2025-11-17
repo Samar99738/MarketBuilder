@@ -37,6 +37,16 @@ router.post('/sessions', asyncHandler(async (req: Request, res: Response) => {
     throw new ValidationError('sessionId is required');
   }
 
+  // Validate tokenAddress is present in config
+  if (!config?.tokenAddress) {
+    throw new ValidationError('tokenAddress is required in config for paper trading session creation');
+  }
+
+  // Validate tokenAddress format (44 characters for Solana address)
+  if (config.tokenAddress.length !== 44) {
+    throw new ValidationError(`Invalid tokenAddress format. Expected 44 characters, got ${config.tokenAddress.length}`);
+  }
+
   const session = await paperTradingEngine.createSession(
     sessionId,
     userId,
@@ -45,7 +55,7 @@ router.post('/sessions', asyncHandler(async (req: Request, res: Response) => {
   );
 
   await awsLogger.info('Paper trading session created via API', {
-    metadata: { sessionId, userId, strategyId }
+    metadata: { sessionId, userId, strategyId, tokenAddress: config.tokenAddress }
   });
 
   res.status(201).json({

@@ -163,11 +163,15 @@ export class PaperTradingEngine {
     const tokenAddress = (config as any)?.tokenAddress; // FIX #5: No ENV_CONFIG fallback
     const strategySide = (config as any)?.strategySide || 'buy'; // 'buy' or 'sell'
     
-    // FIX #5: Validate tokenAddress is provided (required for all strategies)
-    if (!tokenAddress || tokenAddress.length !== 44) {
+    // Validate tokenAddress is provided (required for all strategies)
+    // Solana addresses are typically 43-44 characters (base58 encoded 32-byte pubkeys)
+    if (!tokenAddress || typeof tokenAddress !== 'string' || tokenAddress.length < 32 || tokenAddress.length > 44) {
       console.error(`❌ [PaperTradingEngine] Invalid or missing tokenAddress: ${tokenAddress}`);
+      console.error(`   Expected: 32-44 character Solana address, Got: ${typeof tokenAddress} with length ${tokenAddress?.length || 0}`);
       throw new Error(`tokenAddress is required for paper trading session creation. Received: ${tokenAddress}`);
     }
+    
+    console.log(`✅ [PaperTradingEngine] Token address validated: ${tokenAddress} (length: ${tokenAddress.length})`);
     
     // Auto-initialize position for SELL strategies (reactive mirror strategies)
     const shouldAutoInitForSellStrategy = initialTokenBalance === 0 && 
@@ -299,7 +303,7 @@ export class PaperTradingEngine {
 
   /**
    * Execute a paper buy order
-   * FIX #10: Added retry logic and better error handling for market data
+   * Added retry logic and better error handling for market data
    */
   async executeBuy(
     sessionId: string,
