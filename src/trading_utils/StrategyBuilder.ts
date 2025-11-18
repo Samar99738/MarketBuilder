@@ -702,7 +702,10 @@ export class StrategyBuilder {
           throw new Error(`Strategy execution exceeded maximum loop count (${maxLoops}). Possible infinite loop.`);
         }
 
-        console.log(`🔍 [DEBUG StrategyBuilder] Loop iteration ${loopCount}, currentStepId: ${context.currentStepId}`);
+        // Reduced logging - only log every 100 iterations when waiting
+        if (loopCount % 100 === 0 || !context.currentStepId?.includes('wait')) {
+          console.log(`🔍 [DEBUG StrategyBuilder] Loop iteration ${loopCount}, currentStepId: ${context.currentStepId}`);
+        }
 
         // PRIORITY CHECK: Abort signal (highest priority)
         if (abortSignal?.aborted) {
@@ -736,19 +739,25 @@ export class StrategyBuilder {
         }
 
         context.logs.push(`Executing step ${loopCount}: ${step.id} (${step.type})`);
-        console.log(`🔍 [DEBUG StrategyBuilder] Executing step: ${step.id} (type: ${step.type}), stop flag: ${context.variables._shouldStop}`);
+        // Reduced logging - skip wait/trigger steps
+        if (!step.id?.includes('wait') && step.id !== 'detect_activity') {
+          console.log(`🔍 [DEBUG StrategyBuilder] Executing step: ${step.id} (type: ${step.type}), stop flag: ${context.variables._shouldStop}`);
+        }
 
         try {
           const result = await this.executeStep(step, context);
           context.stepResults[step.id] = result;
           completedSteps.push(step.id);
 
-          console.log(`🔍 [DEBUG StrategyBuilder] Step result:`, {
-            stepId: step.id,
-            success: result.success,
-            hasData: !!result.data,
-            message: result.message
-          });
+          // Reduced logging - skip wait/trigger steps
+          if (!step.id?.includes('wait') && step.id !== 'detect_activity') {
+            console.log(`🔍 [DEBUG StrategyBuilder] Step result:`, {
+              stepId: step.id,
+              success: result.success,
+              hasData: !!result.data,
+              message: result.message
+            });
+          }
 
           // Check if this step requested subscription (reactive strategies)
           // Return IMMEDIATELY so StrategyExecutionManager can subscribe without waiting for more iterations
@@ -808,7 +817,10 @@ export class StrategyBuilder {
           }
         }
 
-        console.log(`🔍 [DEBUG StrategyBuilder] End of loop iteration ${loopCount}, next step: ${context.currentStepId || 'NONE'}, stop flag: ${context.variables._shouldStop}`);
+        // Reduced logging - only every 100 iterations
+        if (loopCount % 100 === 0 || !context.currentStepId?.includes('wait')) {
+          console.log(`🔍 [DEBUG StrategyBuilder] End of loop iteration ${loopCount}, next step: ${context.currentStepId || 'NONE'}, stop flag: ${context.variables._shouldStop}`);
+        }
       }
 
       context.logs.push(`Strategy execution completed successfully after ${loopCount} iterations`);
