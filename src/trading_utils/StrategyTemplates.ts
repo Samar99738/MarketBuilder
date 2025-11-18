@@ -1653,6 +1653,11 @@ export function createReactiveMirrorStrategy(config: {
           if (shouldTrigger) {
             console.log(`✅ TRIGGER MATCHED! Executing ${config.side} order\n`);
 
+            // CRITICAL FIX: Reset flag IMMEDIATELY after detection
+            // This allows multiple rapid BUY trades to each trigger execution
+            context.variables.realTradeDetected = false;
+            console.log(`🔄 [FLAG RESET] Flag reset immediately - ready for next trade`);
+
             // CRITICAL: Set detectedVolume based on what strategy needs
             // - SELL strategies (watching buys) need volume in SOL (how much SOL was spent buying)
             // - BUY strategies (watching sells) need volume in TOKENS (how many tokens were sold)
@@ -1824,11 +1829,14 @@ export function createReactiveMirrorStrategy(config: {
         const detectedVolumeSOL = context.variables.detectedVolume || 0.001;
         let currentPosition = context.variables.tokenBalance;
 
-        // PAPER TRADING FIX: Check if user specified initial virtual position
-        if ((!currentPosition || currentPosition <= 0) && context.strategyConfig?.initialTokenBalance) {
-          const initialBalance = parseFloat(context.strategyConfig.initialTokenBalance);
+        // PAPER TRADING FIX: Check if user specified initial virtual position OR auto-initialize for SELL strategies
+        if (!currentPosition || currentPosition <= 0) {
+          const userSpecified = context.strategyConfig?.initialTokenBalance;
+          const initialBalance = userSpecified ? parseFloat(userSpecified) : 100000; // Default 100k tokens for SELL strategies
+          
           if (initialBalance > 0) {
-            console.log(`💰 [PAPER TRADING] Using initial virtual position: ${initialBalance.toLocaleString()} tokens`);
+            console.log(`💰 [AUTO-INIT] ${userSpecified ? 'Using user-specified' : 'Auto-initializing'} virtual position: ${initialBalance.toLocaleString()} tokens`);
+            console.log(`💰 [AUTO-INIT] This allows reactive SELL strategy to execute immediately`);
             currentPosition = initialBalance;
             context.variables.tokenBalance = initialBalance;
             
@@ -1839,7 +1847,8 @@ export function createReactiveMirrorStrategy(config: {
                   context.strategyConfig.tokenAddress,
                   initialBalance
                 );
-                console.log(`✅ [PAPER TRADING] Virtual position added to portfolio`);
+                console.log(`✅ [PAPER TRADING] Virtual position added to portfolio: ${initialBalance.toLocaleString()} tokens`);
+                console.log(`✅ [PAPER TRADING] Can now execute SELL trades mirroring BUY activity`);
               } catch (err) {
                 console.warn(`⚠️ [PAPER TRADING] Could not add to portfolio:`, err);
               }
@@ -1847,25 +1856,18 @@ export function createReactiveMirrorStrategy(config: {
           }
         }
 
+        // Verify position is now available
         if (!currentPosition || currentPosition <= 0){
-          console.warn(`⚠️ [POSITION WARNING] No token position found for reactive SELL strategy`);
-          console.warn(`⚠️ This is a REACTIVE SELL strategy - it mirrors BUY activity but has no tokens to sell.`);
-          console.warn(`⚠️ SOLUTION: Either:`);
-          console.warn(`⚠️   1. Specify 'initialTokenBalance' in strategy config (for paper trading)`);
-          console.warn(`⚠️   2. Start with a BUY strategy first to accumulate tokens`);
-          console.warn(`⚠️   3. Manually add initial position via paper trading`);
-          console.warn(`⚠️   4. Use a hybrid strategy (buy first, then reactive sells)`);
-          console.warn(`⚠️ Skipping this execution - will retry on next trigger\n`);
+          console.error(`❌ [POSITION ERROR] Failed to initialize token position for SELL strategy`);
+          console.error(`❌ Cannot execute SELL without tokens. Please check paper trading engine.`);
           
           // Mark this execution as skipped, not failed
           context.variables._executionSkipped = true;
-          context.variables._skipReason = 'No tokens to sell';
+          context.variables._skipReason = 'Failed to initialize position';
           
           // CRITICAL: Reset the trade detected flag so we can catch the NEXT trade
           context.variables.realTradeDetected = false;
           
-          // Don't throw error - just return false to skip this execution
-          // Strategy will LOOP BACK to monitoring and try again on next buy
           return false;
         }
 
@@ -1876,30 +1878,34 @@ export function createReactiveMirrorStrategy(config: {
         console.log(`📌 Detected volume: ${detectedVolumeSOL.toFixed(6)} SOL`);
         console.log(`📌 Current position: ${currentPosition.toLocaleString()} tokens`);
 
-        // Get current token price - PRIORITIZE FRESH PRICE from fetch_token_price step
-        // Order of priority: fresh fetch > cached variable > fallback
-        let currentPrice = context.stepResults?.fetch_token_price?.data?.price ||
+        // Get current token price - PRIORITIZE REAL TRADE PRICE from detected trade
+        // Order of priority: real trade price > fresh fetch > cached variable > fallback
+        let currentPrice = context.variables?.realTradePrice || // BEST: Price from the actual trade that triggered us
+          context.stepResults?.fetch_token_price?.data?.price ||
           context.variables?.currentPrice ||
           context.variables?.lastKnownPrice;
 
+        console.log(`📌 Price from real trade (TRIGGER): ${context.variables?.realTradePrice}`);
         console.log(`📌 Price from fetch_token_price (FRESH): ${context.stepResults?.fetch_token_price?.data?.price}`);
         console.log(`📌 Price from variables (CACHED): ${context.variables?.currentPrice}`);
         console.log(`📌 Final price used: ${currentPrice}`);
 
         // Warn if there's a significant price mismatch between fresh and cached
-        const freshPrice = context.stepResults?.fetch_token_price?.data?.price;
-        const cachedPrice = context.variables?.currentPrice;
-        if (freshPrice && cachedPrice && freshPrice !== cachedPrice) {
-          const priceDiff = Math.abs((freshPrice - cachedPrice) / cachedPrice) * 100;
+        const tradePrice = context.variables?.realTradePrice;
+        const fetchedPrice = context.stepResults?.fetch_token_price?.data?.price;
+        if (tradePrice && fetchedPrice && tradePrice !== fetchedPrice) {
+          const priceDiff = Math.abs((tradePrice - fetchedPrice) / fetchedPrice) * 100;
           if (priceDiff > 5) {
-            console.warn(`⚠️ [PRICE MISMATCH] Fresh price differs from cached by ${priceDiff.toFixed(2)}%! (Fresh: ${freshPrice}, Cached: ${cachedPrice})`);
+            console.warn(`⚠️ [PRICE MISMATCH] Trade price differs from fetched by ${priceDiff.toFixed(2)}%! (Trade: ${tradePrice}, Fetched: ${fetchedPrice})`);
+            console.warn(`⚠️ Using trade price as it's more accurate (reflects actual execution price)`);
           }
         }
 
         // Validate price - NO FALLBACKS!
         if (!currentPrice || currentPrice <= 0) {
-          console.error(`❌ [PRICE ERROR] Could not fetch valid price`);
-          throw new Error('Cannot execute trade without current market price. Price fetch failed.');
+          console.error(`❌ [PRICE ERROR] Could not get valid price from any source`);
+          console.error(`❌ Available prices: trade=${context.variables?.realTradePrice}, fetched=${context.stepResults?.fetch_token_price?.data?.price}, cached=${context.variables?.currentPrice}`);
+          throw new Error('Cannot execute trade without current market price. All price sources failed.');
         }
         
         if (currentPrice >= 1) {
@@ -1918,10 +1924,11 @@ export function createReactiveMirrorStrategy(config: {
         } else if (sizingRule === 'mirror_buy_volume') {
           // EXACT 1:1 MIRRORING: Sell the exact same token amount that buyers are buying
           // Convert detected SOL volume to token amount using current price
-          calculatedAmount = detectedVolumeSOL / currentPrice;
+          const mirrorSolAmount = context.variables.realTradeSolAmount || detectedVolumeSOL;
+          calculatedAmount = mirrorSolAmount / currentPrice;
 
           console.log(`🎯 [MIRROR MODE] Exact 1:1 mirroring enabled`);
-          console.log(`📊 [MIRROR MODE] Detected buy: ${detectedVolumeSOL.toFixed(6)} SOL`);
+          console.log(`📊 [MIRROR MODE] Detected buy: ${mirrorSolAmount.toFixed(6)} SOL (direct from trade)`);
           console.log(`📊 [MIRROR MODE] Current price: ${currentPrice.toFixed(10)} SOL per token`);
           console.log(`📊 [MIRROR MODE] Raw calculation: ${calculatedAmount.toFixed(2)} tokens`);
           console.log(`📊 [MIRROR MODE] Will sell EXACTLY: ${Math.floor(calculatedAmount).toLocaleString()} tokens`);
@@ -1990,10 +1997,6 @@ export function createReactiveMirrorStrategy(config: {
         context.variables.executionCount = (context.variables.executionCount || 0) + 1;
         const lastSellAmount = context.stepResults.execute_mirror_sell?.data?.tokenAmount || 0;
         console.log(`💰 [MIRROR SELL #${context.variables.executionCount}] Sold ${lastSellAmount} tokens (dynamically calculated)`);
-
-        // Reset the flag AFTER Successful execution
-        context.variables.realTradeDetected = false;
-        console.log(`[FLAG RESET] Trade Processed successfully, ready for next event`);
         return true;
       },
       onSuccess: 'wait_for_trigger',
