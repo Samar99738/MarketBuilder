@@ -20,6 +20,7 @@ import { PaperTradingPortfolio } from './PaperTradingPortfolio';
 import { marketDataProvider } from './MarketDataProvider';
 import { awsLogger } from '../../aws/logger';
 import { ENV_CONFIG } from '../../config/environment';
+import { timeStamp } from 'console';
 
 const SOL_ADDRESS = 'So11111111111111111111111111111111111111112';
 
@@ -175,8 +176,8 @@ export class PaperTradingEngine {
     
     // Auto-initialize position for SELL strategies (reactive mirror strategies)
     const shouldAutoInitForSellStrategy = initialTokenBalance === 0 && 
-                                         strategySide === 'sell' && 
-                                         tokenAddress;
+                                          strategySide === 'sell' && 
+                                          tokenAddress;
     
     const effectiveTokenBalance = shouldAutoInitForSellStrategy ? 100000 : initialTokenBalance;
     
@@ -290,6 +291,26 @@ export class PaperTradingEngine {
     await awsLogger.info('Paper trading session created', {
       metadata: { sessionId, userId, strategyId }
     });
+
+    // Emit initial balance to UI immediately after session creation
+    if (this.io) {
+      const positions = Array.from((portfolio as any).positions?.values() || []);
+      const initialBalanceEvent = {
+        sessionId,
+        timestamp: Date.now(),
+        balanceSOL: state.portfolio.balanceSOL,
+        balanceUSDC: state.portfolio.balanceUSDC,
+        balanceTokens: state.portfolio.balanceTokens,
+        totalValueUSD: state.metrics.totalValueUSD,
+        roi: state.metrics.roi,
+        totalPnL: state.metrics.totalPnL,
+        totalPnLUSD: state.metrics.totalPnLUSD,
+        positions: positions,
+        isInitialState: true
+      };
+      this.io.emit('paper:balance:update', initialBalanceEvent);
+      console.log(`📡 [WebSocket] Emitted INITIAL balance: ${state.portfolio.balanceSOL} SOL, ${state.portfolio.balanceTokens} tokens`);
+    }
 
     return state;
   }
@@ -1441,6 +1462,21 @@ export class PaperTradingEngine {
       
       console.log(`✅ [PaperTradingEngine] Auto-initialized position for ${tokenAddress} with 100k tokens`);
       console.log(`💵 Auto-init position value: ${costBasisSOL.toFixed(6)} SOL = $${costBasisUSD.toFixed(2)} USD`);
+      
+      // Emit balance update to UI immediately after auto-init
+      if (this.io) {
+        const balanceUpdateEvent = {
+          sessionId,
+          timestamp: Date.now(),
+          balanceSOL: state.portfolio.balanceSOL,
+          balanceUSDC: state.portfolio.balanceUSDC,
+          balanceTokens: autoInitTokens,
+          totalValueUSD: state.portfolio.balanceSOL * solPriceUSD,
+          positions: Array.from((portfolio as any).positions?.values() || [])
+        };
+        this.io.emit('paper:balance:update', balanceUpdateEvent);
+        console.log(`📡 [WebSocket] Emitted balance update after auto-init`);
+      }
     }
     
     if (!position || position.amount < actualTokenAmount) {
@@ -2258,7 +2294,6 @@ export class PaperTradingEngine {
 
     return interval;
   }
-
   /**
    * Track trade execution performance
    */
