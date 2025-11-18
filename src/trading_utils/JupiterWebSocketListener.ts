@@ -282,6 +282,11 @@ export class JupiterWebSocketListener extends EventEmitter {
       let tokenIncreased = false;
 
       // Find token balance change for our target token
+      // CRITICAL FIX: Skip pool vault accounts, only track USER wallet accounts
+      // Pool vaults show INVERTED signals (pool loses tokens when user buys)
+      // Pool vaults typically have MILLIONS of tokens (100K+), user wallets typically <100K
+      const POOL_VAULT_THRESHOLD = 100000; // Raised threshold - accounts with >100K tokens are pool vaults
+      
       for (const pre of preTokenBalances) {
         if (pre.mint?.toLowerCase() !== targetToken) continue;
 
@@ -294,10 +299,18 @@ export class JupiterWebSocketListener extends EventEmitter {
           const postAmount = parseFloat(post.uiTokenAmount.uiAmountString || '0');
           const change = Math.abs(postAmount - preAmount);
           
+          // CRITICAL: Skip pool vault accounts (they have huge balances)
+          // Pool vaults show INVERTED signals, we only want USER wallets
+          if (preAmount > POOL_VAULT_THRESHOLD || postAmount > POOL_VAULT_THRESHOLD) {
+            continue; // Skip pool vault - balance too large for user wallet
+          }
+          
+          const owner = pre.owner || post.owner || '';
+          
           if (change > tokenAmount) {
             tokenAmount = change;
-            tokenIncreased = postAmount > preAmount;
-            userAccount = pre.owner || post.owner || '';
+            tokenIncreased = postAmount > preAmount; // TRUE if USER wallet increased = BUY
+            userAccount = owner;
           }
         }
       }
