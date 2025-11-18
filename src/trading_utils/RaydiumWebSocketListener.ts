@@ -543,25 +543,82 @@ export class RaydiumWebSocketListener extends EventEmitter {
       let actualTokenMint: string | null = null; // Track which token was actually traded
 
       // Find the ACTUAL token being traded (largest balance change)
-      // Then validate if it matches our monitored token
+      // CRITICAL FIX: Skip pool vault accounts, only track USER wallet accounts
+      // Pool reserves show INVERTED signals (pool loses tokens when user buys)
+      
+      // Debug: Show ALL token accounts first
+      console.log(`    [DEBUG] Total preTokenBalances: ${preTokenBalances.length}`);
+      console.log(`    [DEBUG] Looking for token: ${poolInfo.tokenMint.substring(0, 8)}...`);
+      
+      // Count how many match our token
+      const matchingTokenAccounts = preTokenBalances.filter((b: any) => 
+        b.mint?.toLowerCase() === poolInfo.tokenMint.toLowerCase()
+      );
+      console.log(`    [DEBUG] Found ${matchingTokenAccounts.length} accounts with monitored token`);
+      
+      const POOL_VAULT_THRESHOLD = 50000; // LOWERED back to 50K - be more aggressive filtering
+      
+      // Build a list of ALL token accounts (both pre and post)
+      // This handles BOTH existing accounts (SELL) and newly created accounts (BUY)
+      const allAccounts = new Map<number, {pre: any, post: any}>();
+      
+      // First, add all accounts from preTokenBalances
       for (const pre of preTokenBalances) {
-        // Process ALL token mints to find which one is actually being traded
-        const post = postTokenBalances.find((p: any) => 
-          p.accountIndex === pre.accountIndex && p.mint === pre.mint
-        );
-
-        if (post) {
-          const preAmount = parseFloat(pre.uiTokenAmount.uiAmountString || '0');
-          const postAmount = parseFloat(post.uiTokenAmount.uiAmountString || '0');
-          const change = Math.abs(postAmount - preAmount);
-          
-          // Find the token with the LARGEST change (that's the one being traded)
-          if (change > tokenAmount) {
-            tokenAmount = change;
-            tokenIncreased = postAmount > preAmount; // TRUE if user received tokens (BUY)
-            userAccount = pre.owner || post.owner || '';
-            actualTokenMint = pre.mint; // Store the actual token mint that was traded
+        if (pre.mint?.toLowerCase() === poolInfo.tokenMint.toLowerCase()) {
+          allAccounts.set(pre.accountIndex, { pre, post: null });
+        }
+      }
+      
+      // Then, add or merge accounts from postTokenBalances
+      for (const post of postTokenBalances) {
+        if (post.mint?.toLowerCase() === poolInfo.tokenMint.toLowerCase()) {
+          const existing = allAccounts.get(post.accountIndex);
+          if (existing) {
+            existing.post = post; // Merge with existing
+          } else {
+            // NEW ACCOUNT! This is likely a BUY (user receives tokens to new account)
+            allAccounts.set(post.accountIndex, { pre: null, post });
           }
+        }
+      }
+      
+      console.log(`    [DEBUG] Total token accounts to process: ${allAccounts.size}`);
+      
+      // Now process all accounts
+      for (const [accountIndex, {pre, post}] of allAccounts.entries()) {
+        const owner = pre?.owner || post?.owner || '';
+        
+        // Get amounts (0 if account didn't exist)
+        const preAmount = pre ? parseFloat(pre.uiTokenAmount.uiAmountString || '0') : 0;
+        const postAmount = post ? parseFloat(post.uiTokenAmount.uiAmountString || '0') : 0;
+        const change = Math.abs(postAmount - preAmount);
+        
+        console.log(`    [DEBUG] Account ${accountIndex}: ${(pre?.mint || post?.mint).substring(0, 8)}... | ${preAmount.toFixed(2)} → ${postAmount.toFixed(2)} (${change > 0 ? (postAmount > preAmount ? '⬆️ UP' : '⬇️ DOWN') : '='} ${change.toFixed(2)})`);
+        console.log(`    [DEBUG] Owner: ${owner.substring(0, 16)}...`);
+        
+        // CRITICAL: Skip pool vault accounts (they have huge balances)
+        // Pool vaults show INVERTED signals, we only want USER wallets
+        if (preAmount > POOL_VAULT_THRESHOLD || postAmount > POOL_VAULT_THRESHOLD) {
+          console.log(`    [DEBUG] ❌ SKIPPING pool vault ${accountIndex} (balance: ${Math.max(preAmount, postAmount).toFixed(0)} tokens - too large for user wallet)`);
+          continue;
+        }
+        
+        // ALSO skip very small changes (dust/rounding errors)
+        if (change < 0.01) {
+          console.log(`    [DEBUG] ❌ SKIPPING account ${accountIndex} (change too small: ${change.toFixed(4)} tokens)`);
+          continue;
+        }
+        
+        console.log(`    [DEBUG] ✅ VALID user account ${accountIndex} (balance: ${Math.max(preAmount, postAmount).toFixed(2)}, change: ${change.toFixed(2)})`);
+        
+        // Find the token with the LARGEST change among USER wallets
+        if (change > tokenAmount) {
+          tokenAmount = change;
+          tokenIncreased = postAmount > preAmount; // TRUE if USER wallet balance increased = BUY
+          userAccount = owner;
+          actualTokenMint = pre?.mint || post?.mint; // Store the actual token mint that was traded
+          
+          console.log(`    [DEBUG] 🎯 LARGEST USER WALLET CHANGE: ${change.toFixed(2)} tokens (${tokenIncreased ? 'USER BOUGHT ⬆️' : 'USER SOLD ⬇️'})`);
         }
       }
 
@@ -584,18 +641,69 @@ export class RaydiumWebSocketListener extends EventEmitter {
         return null; // Wrong token - don't process this transaction
       }
 
-      // If no token mint found at all, reject
+      // FALLBACK: If no user wallet found, use INVERTED pool vault signal
+      // This happens in aggregator swaps where user's token account doesn't appear
       if (!actualTokenMint) {
-        console.log(`⚠️ [RaydiumWS] parseTransfers - No token mint found in transaction`);
+        console.log(`⚠️ [RaydiumWS] No user wallet found - using INVERTED pool vault signal`);
         
-        // Emit heartbeat to show listener is alive
-        this.emit('heartbeat', { 
-          processed: true, 
-          matched: false, 
-          reason: 'no_token_found'
-        });
+        // Find the SMALLEST pool vault (most accurate for price)
+        let smallestVault: any = null;
+        let smallestBalance = Infinity;
         
-        return null;
+        for (const pre of preTokenBalances) {
+          if (pre.mint?.toLowerCase() !== poolInfo.tokenMint.toLowerCase()) continue;
+          
+          const post = postTokenBalances.find((p: any) => 
+            p.accountIndex === pre.accountIndex && p.mint === pre.mint
+          );
+          
+          if (post) {
+            const preAmount = parseFloat(pre.uiTokenAmount.uiAmountString || '0');
+            const postAmount = parseFloat(post.uiTokenAmount.uiAmountString || '0');
+            const change = Math.abs(postAmount - preAmount);
+            
+            // Only consider accounts that actually changed
+            if (change > 0.01 && preAmount < smallestBalance && preAmount > POOL_VAULT_THRESHOLD) {
+              smallestBalance = preAmount;
+              smallestVault = {
+                pre,
+                post,
+                preAmount,
+                postAmount,
+                change,
+                owner: pre.owner || ''
+              };
+            }
+          }
+        }
+        
+        if (smallestVault) {
+          // INVERT the signal: pool vault GAINS tokens = user SOLD (gave tokens to pool)
+          // pool vault LOSES tokens = user BOUGHT (took tokens from pool)
+          tokenAmount = smallestVault.change;
+          // CRITICAL: tokenIncreased represents USER's perspective, not pool's
+          // If pool gained tokens (post > pre) → user SOLD → tokenIncreased should be FALSE
+          // If pool lost tokens (post < pre) → user BOUGHT → tokenIncreased should be TRUE
+          tokenIncreased = smallestVault.postAmount < smallestVault.preAmount; // Pool lost = user bought
+          userAccount = smallestVault.owner;
+          actualTokenMint = smallestVault.pre.mint;
+          
+          console.log(`    [DEBUG] 🔄 Using INVERTED pool vault signal:`);
+          console.log(`    [DEBUG] Pool vault: ${smallestVault.preAmount.toFixed(0)} → ${smallestVault.postAmount.toFixed(0)}`);
+          console.log(`    [DEBUG] Pool ${smallestVault.postAmount > smallestVault.preAmount ? 'GAINED' : 'LOST'} ${smallestVault.change.toFixed(2)} tokens`);
+          console.log(`    [DEBUG] User perspective: ${tokenIncreased ? 'BOUGHT' : 'SOLD'} ${smallestVault.change.toFixed(2)} tokens`);
+        } else {
+          console.log(`⚠️ [RaydiumWS] parseTransfers - No valid pool vault found either`);
+          
+          // Emit heartbeat to show listener is alive
+          this.emit('heartbeat', { 
+            processed: true, 
+            matched: false, 
+            reason: 'no_token_found'
+          });
+          
+          return null;
+        }
       }
 
       // Get SOL balance changes (lamports to SOL)
@@ -649,6 +757,14 @@ export class RaydiumWebSocketListener extends EventEmitter {
       }
 
       if (solAmount > 0.0001 && tokenAmount > 0) { // Minimum threshold
+        console.log(`🔍 [RaydiumWS] ===== FINAL TRADE DETERMINATION =====`);
+        console.log(`   tokenIncreased: ${tokenIncreased} (user's token balance ${tokenIncreased ? 'INCREASED' : 'DECREASED'})`);
+        console.log(`   isBuy: ${isBuy} (this means user ${isBuy ? 'BOUGHT tokens' : 'SOLD tokens'})`);
+        console.log(`   tokenAmount: ${tokenAmount.toFixed(2)}`);
+        console.log(`   solAmount: ${solAmount.toFixed(6)}`);
+        console.log(`   Returning isBuy=${isBuy} to RealTradeFeedService`);
+        console.log(`===========================================\n`);
+        
         return {
           solAmount,
           tokenAmount,
