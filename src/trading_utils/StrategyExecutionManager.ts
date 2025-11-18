@@ -1052,7 +1052,12 @@ export class StrategyExecutionManager {
     
     // Now listen for the events using LOWERCASE token address for consistent matching
     const eventHandler = (tradeEvent: any) => {
-      console.log(`[StrategyExecutionManager] 🔔 Real trade detected for ${runningId}:`, tradeEvent);
+      console.log(`\n🔔🔔🔔 [StrategyExecutionManager] TRADE EVENT RECEIVED! 🔔🔔🔔`);
+      console.log(`🔔 Strategy: ${runningId}`);
+      console.log(`🔔 Token: ${normalizedToken}`);
+      console.log(`🔔 Trade Type: ${tradeEvent.type}`);
+      console.log(`🔔 Trade Data:`, tradeEvent);
+      console.log(`🔔 Triggering handleRealTimeEvent...\n`);
       // Trigger immediate execution
       this.handleRealTimeEvent(runningId, tradeEvent);
     };
