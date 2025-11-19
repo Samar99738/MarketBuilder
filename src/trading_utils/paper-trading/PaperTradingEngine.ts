@@ -1415,12 +1415,15 @@ export class PaperTradingEngine {
         };
       }
       
+      // CRITICAL FIX: Auto-initialize with NEUTRAL cost basis
+      // We're simulating that the user ALREADY OWNS these tokens at current market price
+      // This means: cost basis = current value, so initial P&L = $0.00
       const autoInitTokens = 100000;
       const marketPrice = marketData.price; // Real token price in SOL
       const priceUSD = marketData.priceUSD; // Real token price in USD
       const solPriceUSD = marketData.solPrice; // Real SOL price in USD
-      const costBasisSOL = autoInitTokens * marketPrice; // Real SOL value
-      const costBasisUSD = autoInitTokens * priceUSD; // Real USD value
+      const costBasisSOL = autoInitTokens * marketPrice; // Cost = current value (neutral P&L)
+      const costBasisUSD = autoInitTokens * priceUSD; // Cost = current value in USD
       
       const now = Date.now();
       const mockBuyTrade: PaperTrade = {
@@ -1434,20 +1437,22 @@ export class PaperTradingEngine {
         orderType: 'market',
         requestedAmount: costBasisSOL,
         executedAmount: costBasisSOL,
-        marketPrice: marketPrice, // REAL current price in SOL
-        executionPrice: marketPrice, // REAL current price in SOL
-        priceUSD: priceUSD, // REAL current price in USD
-        solPriceUSD: solPriceUSD, // REAL SOL price
-        amountSOL: costBasisSOL, // Real SOL value of tokens
+        marketPrice: marketPrice, // Current price at auto-init
+        executionPrice: marketPrice, // Current price at auto-init
+        priceUSD: priceUSD, // Current price in USD
+        solPriceUSD: solPriceUSD, // SOL price in USD
+        amountSOL: costBasisSOL, // Total cost in SOL
         amountTokens: autoInitTokens,
         tradingFee: 0,
         networkFee: 0,
         slippage: 0,
         totalCost: costBasisSOL,
-        balanceSOL: state.portfolio.balanceSOL, // Keep SOL unchanged (no actual purchase)
+        // CRITICAL: Virtual ownership - we OWN tokens but didn't SPEND SOL
+        // Think of it as: "User deposited 100K tokens worth X SOL into the portfolio"
+        balanceSOL: state.portfolio.balanceSOL, // Keep SOL unchanged
         balanceUSDC: state.portfolio.balanceUSDC,
-        balanceTokens: autoInitTokens,
-        realizedPnL: 0,
+        balanceTokens: autoInitTokens, // Now holding 100K tokens
+        realizedPnL: 0, // Neutral position (cost = value)
         trigger: 'auto_init_for_sell_strategy',
       };
       
@@ -1460,8 +1465,13 @@ export class PaperTradingEngine {
       // Refresh position reference
       position = portfolio.getPosition(tokenAddress);
       
-      console.log(`✅ [PaperTradingEngine] Auto-initialized position for ${tokenAddress} with 100k tokens`);
-      console.log(`💵 Auto-init position value: ${costBasisSOL.toFixed(6)} SOL = $${costBasisUSD.toFixed(2)} USD`);
+      console.log(`\n✅ [AUTO-INIT] Virtual position created for ${marketData.tokenSymbol || 'TOKEN'}`);
+      console.log(`📦 Tokens: ${autoInitTokens.toLocaleString()}`);
+      console.log(`💰 Current Price: ${marketPrice.toFixed(10)} SOL/token`);
+      console.log(`📊 Cost Basis: ${costBasisSOL.toFixed(6)} SOL ($${costBasisUSD.toFixed(2)} USD)`);
+      console.log(`💎 Current Value: ${costBasisSOL.toFixed(6)} SOL ($${costBasisUSD.toFixed(2)} USD)`);
+      console.log(`📈 Initial P&L: $0.00 (cost = value, neutral position)`);
+      console.log(`🎯 This means: When price moves, P&L will reflect actual gains/losses\n`);
       
       // Emit balance update to UI immediately after auto-init
       if (this.io) {
