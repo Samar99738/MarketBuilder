@@ -1609,9 +1609,9 @@ export function createReactiveMirrorStrategy(config: {
     {
       id: 'wait_delay',
       type: 'wait',
-      durationMs: 100, // Check every 0.1 seconds in simulation
+      durationMs: 500, // Check every 0.5 seconds (reduced CPU usage)
       onSuccess: 'detect_activity',
-      description: 'Wait 0.1s before next trigger check'
+      description: 'Wait 0.5s before next trigger check'
     },
     {
       id: 'detect_activity',
@@ -1624,9 +1624,16 @@ export function createReactiveMirrorStrategy(config: {
           return false;
         }
 
+        // Track consecutive failed detections to prevent infinite loops
+        if (!context.variables._detectionAttempts) {
+          context.variables._detectionAttempts = 0;
+        }
+        
         // REAL BLOCKCHAIN MONITORING
         // Check if we received a real trade event from RealTradeFeedService
         if (context.variables.realTradeDetected === true) {
+          // Reset attempt counter on successful detection
+          context.variables._detectionAttempts = 0;
           const tradeType = context.variables.realTradeType; // 'buy' or 'sell'
           const tradePrice = context.variables.realTradePrice;
           const tradeSolAmount = context.variables.realTradeSolAmount;
@@ -1704,6 +1711,18 @@ export function createReactiveMirrorStrategy(config: {
             console.log(`ℹ️ [RESET] Trade type mismatch, resetting flag for next detection`);
             console.log(`ℹ️ [IGNORED TRADE] ${tradeType.toUpperCase()} trade ignored - looking for ${triggerAction.toUpperCase()} trades`);
           }
+        }
+
+        // Increment detection attempts
+        context.variables._detectionAttempts++;
+        
+        // CRITICAL FIX: Yield control periodically to prevent CPU saturation
+        // After 50 failed attempts (~25 seconds), pause execution and return
+        // This prevents the 1000-iteration limit and allows event loop to process new trades
+        if (context.variables._detectionAttempts >= 50) {
+          console.log(`⏸️ [DETECT] Pausing after ${context.variables._detectionAttempts} checks (~25s) - yielding control`);
+          context.variables._detectionAttempts = 0; // Reset counter
+          // Return false to go back to wait_for_trigger and re-enter waiting state
         }
 
         return false; // No trigger yet, keep waiting
@@ -1921,17 +1940,27 @@ export function createReactiveMirrorStrategy(config: {
           calculatedAmount = config.sellAmount;
           console.log(`💎 [FIXED USER AMOUNT] User specified exact amount: ${config.sellAmount.toLocaleString()} tokens`);
           console.log(`📊 [INFO] Ignoring detected volume - using user's fixed amount`);
-        } else if (sizingRule === 'mirror_buy_volume') {
+        } else if (sizingRule === 'mirror_buy_volume' || sizingRule === 'mirror_volume') {
           // EXACT 1:1 MIRRORING: Sell the exact same token amount that buyers are buying
-          // Convert detected SOL volume to token amount using current price
+          // CRITICAL FIX: Use the actual token amount from the real trade, NOT recalculated from SOL
+          // This ensures 100% accurate mirroring regardless of price slippage
+          const mirrorTokenAmount = context.variables.realTradeTokenAmount;
           const mirrorSolAmount = context.variables.realTradeSolAmount || detectedVolumeSOL;
-          calculatedAmount = mirrorSolAmount / currentPrice;
-
-          console.log(`🎯 [MIRROR MODE] Exact 1:1 mirroring enabled`);
-          console.log(`📊 [MIRROR MODE] Detected buy: ${mirrorSolAmount.toFixed(6)} SOL (direct from trade)`);
-          console.log(`📊 [MIRROR MODE] Current price: ${currentPrice.toFixed(10)} SOL per token`);
-          console.log(`📊 [MIRROR MODE] Raw calculation: ${calculatedAmount.toFixed(2)} tokens`);
-          console.log(`📊 [MIRROR MODE] Will sell EXACTLY: ${Math.floor(calculatedAmount).toLocaleString()} tokens`);
+          
+          if (mirrorTokenAmount && mirrorTokenAmount > 0) {
+            // Use actual token amount from trade (MOST ACCURATE)
+            calculatedAmount = mirrorTokenAmount;
+            console.log(`🎯 [MIRROR MODE] Exact 1:1 mirroring - using ACTUAL trade token amount`);
+            console.log(`📊 [MIRROR MODE] Detected buy: ${mirrorTokenAmount.toFixed(2)} tokens (${mirrorSolAmount.toFixed(6)} SOL)`);
+            console.log(`📊 [MIRROR MODE] Will sell EXACTLY: ${Math.floor(calculatedAmount).toLocaleString()} tokens`);
+          } else {
+            // Fallback: Calculate from SOL amount (less accurate due to price movement)
+            calculatedAmount = mirrorSolAmount / currentPrice;
+            console.log(`⚠️ [MIRROR MODE] Token amount not available, calculating from SOL`);
+            console.log(`📊 [MIRROR MODE] Detected buy: ${mirrorSolAmount.toFixed(6)} SOL`);
+            console.log(`📊 [MIRROR MODE] Current price: ${currentPrice.toFixed(10)} SOL per token`);
+            console.log(`📊 [MIRROR MODE] Calculated: ${calculatedAmount.toFixed(2)} tokens`);
+          }
         } else if (sizingRule === 'percentage') {
           // Percentage of position (5% default)
           const sellPercentage = 0.05;
@@ -1997,6 +2026,12 @@ export function createReactiveMirrorStrategy(config: {
         context.variables.executionCount = (context.variables.executionCount || 0) + 1;
         const lastSellAmount = context.stepResults.execute_mirror_sell?.data?.tokenAmount || 0;
         console.log(`💰 [MIRROR SELL #${context.variables.executionCount}] Sold ${lastSellAmount} tokens (dynamically calculated)`);
+        
+        // CRITICAL FIX: Reset ALL flags to clean state after execution
+        context.variables.realTradeDetected = false;
+        context.variables._detectionAttempts = 0; // Reset detection counter
+        console.log(`🔄 [FLAG RESET] Trade executed successfully, all flags reset for next trigger`);
+        
         return true;
       },
       onSuccess: 'wait_for_trigger',
@@ -2161,9 +2196,10 @@ export function createReactiveMirrorStrategy(config: {
         const lastBuySOL = context.stepResults.execute_mirror_buy?.data?.solAmount || 0;
         console.log(`💰 [MIRROR BUY #${context.variables.executionCount}] Bought with ${lastBuySOL.toFixed(6)} SOL (dynamically calculated)`);
 
-        // Reset the flag AFTER Successful execution
+        // CRITICAL FIX: Reset ALL flags to clean state after execution
         context.variables.realTradeDetected = false;
-        console.log(`[FLAG RESET] Trade Processed successfully, ready for next event`);
+        context.variables._detectionAttempts = 0; // Reset detection counter
+        console.log(`🔄 [FLAG RESET] Trade executed successfully, all flags reset for next trigger`);
         return true;
       },
       onSuccess: 'wait_for_trigger',
