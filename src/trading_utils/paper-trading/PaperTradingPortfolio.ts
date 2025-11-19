@@ -141,6 +141,14 @@ export class PaperTradingPortfolio {
     const proceeds = trade.amountSOL;
     const realizedPnL = proceeds - costBasis;
 
+    console.log(`\n💰 [P&L CALCULATION] ${trade.tokenSymbol || 'TOKEN'} SELL`);
+    console.log(`📊 Sold: ${soldTokens.toLocaleString()} tokens`);
+    console.log(`💵 Avg Cost: ${avgCostPerToken.toFixed(10)} SOL/token`);
+    console.log(`📉 Total Cost Basis: ${costBasis.toFixed(6)} SOL`);
+    console.log(`💰 Proceeds (after fees): ${proceeds.toFixed(6)} SOL`);
+    console.log(`${realizedPnL >= 0 ? '📈' : '📉'} Realized P&L: ${realizedPnL.toFixed(6)} SOL (${realizedPnL >= 0 ? 'PROFIT ✅' : 'LOSS ❌'})`);
+    console.log(`📊 P&L %: ${((realizedPnL / costBasis) * 100).toFixed(2)}%\n`);
+
     // Update trade with realized P&L
     trade.realizedPnL = realizedPnL;
 
