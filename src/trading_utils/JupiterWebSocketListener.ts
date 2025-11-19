@@ -149,11 +149,13 @@ export class JupiterWebSocketListener extends EventEmitter {
       
       this.processedSignatures.add(signature);
       
+      // Better cleanup - keep only last 500 signatures
       if (this.processedSignatures.size > this.MAX_PROCESSED_SIGNATURES) {
-        const firstSignature = this.processedSignatures.values().next().value;
-        if (firstSignature) {
-          this.processedSignatures.delete(firstSignature);
-        }
+        const sigArray = Array.from(this.processedSignatures);
+        const toKeep = sigArray.slice(-500); // Keep newest 500
+        this.processedSignatures = new Set(toKeep);
+        
+        console.log(`[JupiterWS] Trimmed processed signatures: ${sigArray.length} → ${toKeep.length}`);
       }
 
       // Fetch full transaction
@@ -281,62 +283,153 @@ export class JupiterWebSocketListener extends EventEmitter {
       let userAccount = '';
       let tokenIncreased = false;
 
-      // Find token balance change for our target token
-      // CRITICAL FIX: Skip pool vault accounts, only track USER wallet accounts
-      // Pool vaults show INVERTED signals (pool loses tokens when user buys)
-      // Pool vaults typically have MILLIONS of tokens (100K+), user wallets typically <100K
-      const POOL_VAULT_THRESHOLD = 100000; // Raised threshold - accounts with >100K tokens are pool vaults
+      // FIX: Check BOTH pre and post balances to catch new accounts
+      const POOL_VAULT_THRESHOLD = 100000;
       
+      console.log(`[JupiterWS] Parsing ${targetToken.substring(0, 8)}... transaction`);
+      console.log(`[JupiterWS] Pre-token accounts: ${preTokenBalances.length}, Post-token accounts: ${postTokenBalances.length}`);
+      
+      // Build map of ALL token accounts (handles NEW accounts)
+      const allAccounts = new Map<number, {pre: any, post: any}>();
+      
+      // Add accounts from preTokenBalances
       for (const pre of preTokenBalances) {
-        if (pre.mint?.toLowerCase() !== targetToken) continue;
+        if (pre.mint?.toLowerCase() === targetToken) {
+          allAccounts.set(pre.accountIndex, { pre, post: null });
+        }
+      }
+      
+      // CRITICAL: Add accounts from postTokenBalances (catches NEW accounts in BUYs)
+      for (const post of postTokenBalances) {
+        if (post.mint?.toLowerCase() === targetToken) {
+          const existing = allAccounts.get(post.accountIndex);
+          if (existing) {
+            existing.post = post;
+          } else {
+            // NEW ACCOUNT! This is likely a BUY
+            allAccounts.set(post.accountIndex, { pre: null, post });
+            console.log(`[JupiterWS] ✅ Found NEW token account (likely BUY): index ${post.accountIndex}`);
+          }
+        }
+      }
+      
+      console.log(`[JupiterWS] Total accounts to analyze: ${allAccounts.size}`);
+      
+      // Process ALL accounts to find largest USER wallet change
+      for (const [accountIndex, {pre, post}] of allAccounts.entries()) {
+        const preAmount = pre ? parseFloat(pre.uiTokenAmount.uiAmountString || '0') : 0;
+        const postAmount = post ? parseFloat(post.uiTokenAmount.uiAmountString || '0') : 0;
+        const change = Math.abs(postAmount - preAmount);
+        
+        console.log(`[JupiterWS]   Account ${accountIndex}: ${preAmount.toFixed(2)} → ${postAmount.toFixed(2)} (${change > 0 ? (postAmount > preAmount ? '↑ UP' : '↓ DOWN') : '='} ${change.toFixed(2)})`);
+        
+        // Skip pool vault accounts (> 100K tokens)
+        if (preAmount > POOL_VAULT_THRESHOLD || postAmount > POOL_VAULT_THRESHOLD) {
+          console.log(`[JupiterWS]   ❌ SKIP pool vault (balance: ${Math.max(preAmount, postAmount).toFixed(0)} > ${POOL_VAULT_THRESHOLD})`);
+          continue;
+        }
+        
+        // Skip dust changes
+        if (change < 0.01) {
+          console.log(`[JupiterWS]   ❌ SKIP dust change (${change.toFixed(4)} < 0.01)`);
+          continue;
+        }
+        
+        console.log(`[JupiterWS]   ✅ Valid user account`);
+        
+        // Find account with LARGEST change (user's primary account)
+        if (change > tokenAmount) {
+          tokenAmount = change;
+          tokenIncreased = postAmount > preAmount; // TRUE = balance increased = BUY
+          userAccount = pre?.owner || post?.owner || '';
+          
+          console.log(`[JupiterWS]   🎯 LARGEST USER CHANGE: ${change.toFixed(2)} tokens`);
+          console.log(`[JupiterWS]   🎯 Direction: ${postAmount > preAmount ? '↑ INCREASED' : '↓ DECREASED'}`);
+          console.log(`[JupiterWS]   🎯 tokenIncreased=${tokenIncreased} → ${tokenIncreased ? '🟢 BUY' : '🔴 SELL'}`);
+        }
+      }
 
-        const post = postTokenBalances.find((p: any) => 
-          p.accountIndex === pre.accountIndex && p.mint?.toLowerCase() === targetToken
-        );
-
-        if (post) {
+      // FALLBACK: If no user wallet found, use INVERTED pool vault signal
+      if (tokenAmount === 0) {
+        console.log(`[JupiterWS] ⚠️ No user wallet found - trying INVERTED pool vault signal`);
+        
+        for (const [accountIndex, {pre, post}] of allAccounts.entries()) {
+          if (!pre || !post) continue;
+          
           const preAmount = parseFloat(pre.uiTokenAmount.uiAmountString || '0');
           const postAmount = parseFloat(post.uiTokenAmount.uiAmountString || '0');
           const change = Math.abs(postAmount - preAmount);
           
-          // CRITICAL: Skip pool vault accounts (they have huge balances)
-          // Pool vaults show INVERTED signals, we only want USER wallets
+          // Find pool vaults (> threshold)
           if (preAmount > POOL_VAULT_THRESHOLD || postAmount > POOL_VAULT_THRESHOLD) {
-            continue; // Skip pool vault - balance too large for user wallet
-          }
-          
-          const owner = pre.owner || post.owner || '';
-          
-          if (change > tokenAmount) {
-            tokenAmount = change;
-            tokenIncreased = postAmount > preAmount; // TRUE if USER wallet increased = BUY
-            userAccount = owner;
+            if (change > tokenAmount) {
+              tokenAmount = change;
+              // INVERT: Pool gained tokens = user sold, Pool lost tokens = user bought
+              const poolGained = postAmount > preAmount;
+              tokenIncreased = !poolGained; // Invert pool signal
+              userAccount = pre.owner || post.owner || '';
+              
+              console.log(`[JupiterWS]   🔄 Using INVERTED pool vault signal`);
+              console.log(`[JupiterWS]   🔄 Pool ${poolGained ? 'GAINED' : 'LOST'} ${change.toFixed(2)} tokens`);
+              console.log(`[JupiterWS]   🔄 User ${tokenIncreased ? 'BOUGHT' : 'SOLD'} (inverted signal)`);
+            }
           }
         }
       }
 
-      if (tokenAmount === 0) return null;
+      if (tokenAmount === 0) {
+        console.log(`[JupiterWS] ❌ No token changes found`);
+        return null;
+      }
 
-      // Get SOL balance changes
+      // Get SOL balance changes for CROSS-VALIDATION
       const preBalances = meta.preBalances || [];
       const postBalances = meta.postBalances || [];
       
       let maxSolChange = 0;
       let solSignerIndex = -1;
+      let solDecreased = false;
 
+      console.log(`[JupiterWS] Analyzing SOL balance changes (${preBalances.length} accounts)...`);
+      
       for (let i = 0; i < preBalances.length; i++) {
         const changeInLamports = Math.abs(postBalances[i] - preBalances[i]);
+        const changeInSOL = changeInLamports / 1e9;
         
-        if (changeInLamports < 1000000) continue; // Skip small changes
+        if (changeInLamports < 1000000) continue; // Skip < 0.001 SOL
         
-        if (changeInLamports > maxSolChange * 1e9) {
-          maxSolChange = changeInLamports / 1e9;
+        console.log(`[JupiterWS]   SOL Account ${i}: ${(preBalances[i] / 1e9).toFixed(6)} → ${(postBalances[i] / 1e9).toFixed(6)} (${changeInSOL.toFixed(6)} SOL change)`);
+        
+        // FIX: Compare lamports to lamports (not lamports to SOL * 1e9)
+        if (changeInLamports > (maxSolChange * 1e9)) {
+          maxSolChange = changeInSOL;
           solSignerIndex = i;
+          solDecreased = postBalances[i] < preBalances[i];
+          console.log(`[JupiterWS]   🎯 NEW LARGEST SOL change: ${changeInSOL.toFixed(6)} SOL (${solDecreased ? '↓ DECREASED' : '↑ INCREASED'})`);
         }
       }
+      
+      console.log(`[JupiterWS] Selected SOL account index: ${solSignerIndex}, amount: ${maxSolChange.toFixed(6)} SOL`)
 
       const solAmount = maxSolChange;
+      
+      // CROSS-VALIDATE: Token and SOL should move in OPPOSITE directions
+      // USER BUY: Tokens UP ↑ + SOL DOWN ↓ (user spent SOL, got tokens)
+      // USER SELL: Tokens DOWN ↓ + SOL UP ↑ (user spent tokens, got SOL)
+      if (solAmount > 0.001) {
+        const signalsAgree = (tokenIncreased && solDecreased) || (!tokenIncreased && !solDecreased);
+        console.log(`[JupiterWS] Cross-validation: Tokens ${tokenIncreased ? 'UP' : 'DOWN'} + SOL ${solDecreased ? 'DOWN' : 'UP'} → ${signalsAgree ? '✅ AGREE' : '⚠️ DISAGREE'}`);
+        
+        // If signals disagree, prefer SOL direction (more reliable)
+        if (!signalsAgree) {
+          console.log(`[JupiterWS] ⚠️ Using SOL direction as primary signal`);
+          tokenIncreased = solDecreased; // SOL decreased = bought tokens
+        }
+      }
+      
       const isBuy = tokenIncreased;
+      console.log(`[JupiterWS] ✅ Final determination: ${isBuy ? '🟢 BUY' : '🔴 SELL'}`);
+      console.log(`[JupiterWS]   SOL: ${solAmount.toFixed(4)}, Tokens: ${tokenAmount.toFixed(2)}\n`);
       
       if (!userAccount && tx.transaction?.message?.accountKeys) {
         const accounts = tx.transaction.message.accountKeys;
