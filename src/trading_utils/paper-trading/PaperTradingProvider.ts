@@ -185,8 +185,16 @@ export class PaperTradingProvider implements TradingProvider {
       // FIX #5: Require explicit tokenAddress from context or constructor (no ENV_CONFIG fallback)
       const tokenAddress = context?.variables?.tokenAddress || this.tokenAddress;
       
-      if (!tokenAddress || tokenAddress.length !== 44) {
-        throw new Error(`[PaperTradingProvider] tokenAddress is required for sellTokens. Received: ${tokenAddress}`);
+      console.log(`[PaperTradingProvider] sellTokens - tokenAddress check:`, {
+        fromContext: context?.variables?.tokenAddress,
+        fromThis: this.tokenAddress,
+        final: tokenAddress,
+        finalLength: tokenAddress?.length,
+        finalType: typeof tokenAddress
+      });
+      
+      if (!tokenAddress || (typeof tokenAddress === 'string' && tokenAddress.length < 32)) {
+        throw new Error(`[PaperTradingProvider] tokenAddress is required for sellTokens. Received: ${tokenAddress} (length: ${tokenAddress?.length})`);
       }
       
       // Update stored token address if provided in context
