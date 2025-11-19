@@ -3,6 +3,7 @@ import { EventEmitter } from 'events';
 import { PoolDiscovery, PoolInfo } from '../utils/PoolDiscovery';
 
 const RAYDIUM_AMM_V4_PROGRAM_ID = '675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8';
+const RAYDIUM_CPMM_PROGRAM_ID = 'CPMMoo8L3F4NbTegBCKVNunggL7H1ZpdTHKxQB5qKP1C';
 const METEORA_DLMM_PROGRAM_ID = 'LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo'; // Meteora Dynamic Liquidity Market Maker
 const ORCA_WHIRLPOOL_PROGRAM_ID = 'whirLbMiicVdio4qvUfM5KAg6Ct8VwpYzGff3uctyCc'; // Orca Whirlpool
 
@@ -239,8 +240,9 @@ export class RaydiumWebSocketListener extends EventEmitter {
       
       // PRODUCTION FIX: Comprehensive swap detection patterns for multiple DEXs
       const isDexSwap = 
-        // Raydium patterns
+        // Raydium patterns (V4 AMM + CPMM)
         logString.includes('Program 675kPX9MHTjS2zt1qfr1NYHuzeLXfQM9H24wFSUt1Mp8 invoke') ||
+        logString.includes('Program CPMMoo8L3F4NbTegBCKVNunggL7H1ZpdTHKxQB5qKP1C invoke') ||
         logString.includes('Program log: ray_log:') ||
         // Meteora patterns
         logString.includes('Program LBUZKhRxPF3XUpBCjp4YzTKgLccjZhTSDM9YuVaPwxo invoke') ||
@@ -294,12 +296,13 @@ export class RaydiumWebSocketListener extends EventEmitter {
       // Add to processed set
       this.processedSignatures.add(signature);
       
-      // Clean up old signatures to prevent memory leak
+      // ✅ Better cleanup - keep only last 500 signatures
       if (this.processedSignatures.size > this.MAX_PROCESSED_SIGNATURES) {
-        const firstSignature = this.processedSignatures.values().next().value;
-        if (firstSignature) {
-          this.processedSignatures.delete(firstSignature);
-        }
+        const sigArray = Array.from(this.processedSignatures);
+        const toKeep = sigArray.slice(-500); // Keep newest 500
+        this.processedSignatures = new Set(toKeep);
+        
+        console.log(`[RaydiumWS] Trimmed processed signatures: ${sigArray.length} → ${toKeep.length}`);
       }
 
       // Fetch full transaction to check which pool it belongs to
@@ -541,6 +544,7 @@ export class RaydiumWebSocketListener extends EventEmitter {
       let userAccount = '';
       let tokenIncreased = false; // Track direction of token change
       let actualTokenMint: string | null = null; // Track which token was actually traded
+      let usedPoolVaultFallback = false; // Track if we used pool vault signal (means userAccount is POOL, not real user)
 
       // Find the ACTUAL token being traded (largest balance change)
       // CRITICAL FIX: Skip pool vault accounts, only track USER wallet accounts
@@ -556,7 +560,11 @@ export class RaydiumWebSocketListener extends EventEmitter {
       );
       console.log(`    [DEBUG] Found ${matchingTokenAccounts.length} accounts with monitored token`);
       
-      const POOL_VAULT_THRESHOLD = 50000; // LOWERED back to 50K - be more aggressive filtering
+      // CRITICAL FIX: Don't use balance threshold alone - it fails for whales!
+      // A user with 28K tokens gets wrongly classified as "pool vault"
+      // Instead, identify pool vaults by checking if they're the LARGEST account
+      // Pool vaults are typically 100x-1000x larger than user wallets
+      const POOL_VAULT_MULTIPLIER = 50; // Pool vault should be 50x larger than next largest
       
       // Build a list of ALL token accounts (both pre and post)
       // This handles BOTH existing accounts (SELL) and newly created accounts (BUY)
@@ -584,41 +592,89 @@ export class RaydiumWebSocketListener extends EventEmitter {
       
       console.log(`    [DEBUG] Total token accounts to process: ${allAccounts.size}`);
       
-      // Now process all accounts
+      // STEP 1: Collect all accounts with their balances (for intelligent filtering)
+      const accountsWithBalances: Array<{
+        index: number;
+        pre: any;
+        post: any;
+        owner: string;
+        preAmount: number;
+        postAmount: number;
+        change: number;
+        maxBalance: number;
+      }> = [];
+      
       for (const [accountIndex, {pre, post}] of allAccounts.entries()) {
         const owner = pre?.owner || post?.owner || '';
-        
-        // Get amounts (0 if account didn't exist)
         const preAmount = pre ? parseFloat(pre.uiTokenAmount.uiAmountString || '0') : 0;
         const postAmount = post ? parseFloat(post.uiTokenAmount.uiAmountString || '0') : 0;
         const change = Math.abs(postAmount - preAmount);
+        const maxBalance = Math.max(preAmount, postAmount);
         
-        console.log(`    [DEBUG] Account ${accountIndex}: ${(pre?.mint || post?.mint).substring(0, 8)}... | ${preAmount.toFixed(2)} → ${postAmount.toFixed(2)} (${change > 0 ? (postAmount > preAmount ? '⬆️ UP' : '⬇️ DOWN') : '='} ${change.toFixed(2)})`);
-        console.log(`    [DEBUG] Owner: ${owner.substring(0, 16)}...`);
+        accountsWithBalances.push({
+          index: accountIndex,
+          pre,
+          post,
+          owner,
+          preAmount,
+          postAmount,
+          change,
+          maxBalance
+        });
+      }
+      
+      // STEP 2: Sort by max balance to identify pool vaults (they're MUCH larger)
+      accountsWithBalances.sort((a, b) => b.maxBalance - a.maxBalance);
+      
+      // STEP 3: Identify pool vault (largest account, typically 50x+ bigger than #2)
+      let poolVaultIndex = -1;
+      if (accountsWithBalances.length >= 2) {
+        const largest = accountsWithBalances[0];
+        const secondLargest = accountsWithBalances[1];
         
-        // CRITICAL: Skip pool vault accounts (they have huge balances)
-        // Pool vaults show INVERTED signals, we only want USER wallets
-        if (preAmount > POOL_VAULT_THRESHOLD || postAmount > POOL_VAULT_THRESHOLD) {
-          console.log(`    [DEBUG] ❌ SKIPPING pool vault ${accountIndex} (balance: ${Math.max(preAmount, postAmount).toFixed(0)} tokens - too large for user wallet)`);
+        // If largest is 50x bigger than second, it's the pool vault
+        if (largest.maxBalance > secondLargest.maxBalance * POOL_VAULT_MULTIPLIER) {
+          poolVaultIndex = largest.index;
+          console.log(`    [DEBUG] 🏦 POOL VAULT DETECTED: Account ${poolVaultIndex} (${largest.maxBalance.toFixed(0)} tokens, ${(largest.maxBalance / secondLargest.maxBalance).toFixed(0)}x larger than #2)`);
+        }
+      }
+      
+      // STEP 4: Process accounts, skipping pool vault
+      for (const acc of accountsWithBalances) {
+        console.log(`    [DEBUG] Account ${acc.index}: ${(acc.pre?.mint || acc.post?.mint).substring(0, 8)}... | ${acc.preAmount.toFixed(2)} → ${acc.postAmount.toFixed(2)} (${acc.change > 0 ? (acc.postAmount > acc.preAmount ? '⬆️ UP' : '⬇️ DOWN') : '='} ${acc.change.toFixed(2)})`);
+        console.log(`    [DEBUG] Owner: ${acc.owner.substring(0, 16)}...`);
+        
+        // Skip pool's own vault (owner is pool address)
+        if (acc.owner.toLowerCase() === poolInfo.poolAddress.toLowerCase()) {
+          console.log(`    [DEBUG] ❌ SKIP pool's own vault (owner IS pool address)`);
           continue;
         }
         
-        // ALSO skip very small changes (dust/rounding errors)
-        if (change < 0.01) {
-          console.log(`    [DEBUG] ❌ SKIPPING account ${accountIndex} (change too small: ${change.toFixed(4)} tokens)`);
+        // Skip identified pool vault
+        if (acc.index === poolVaultIndex) {
+          console.log(`    [DEBUG] ❌ SKIP pool vault (detected as largest account)`);
           continue;
         }
         
-        console.log(`    [DEBUG] ✅ VALID user account ${accountIndex} (balance: ${Math.max(preAmount, postAmount).toFixed(2)}, change: ${change.toFixed(2)})`);
+        // Skip dust changes
+        if (acc.change < 0.01) {
+          console.log(`    [DEBUG] ❌ SKIP dust change (${acc.change.toFixed(4)} < 0.01)`);
+          continue;
+        }
         
-        // Find the token with the LARGEST change among USER wallets
-        if (change > tokenAmount) {
-          tokenAmount = change;
-          tokenIncreased = postAmount > preAmount; // TRUE if USER wallet balance increased = BUY
-          userAccount = owner;
-          actualTokenMint = pre?.mint || post?.mint; // Store the actual token mint that was traded
+        console.log(`    [DEBUG] ✅ VALID user account (balance: ${acc.maxBalance.toFixed(2)}, change: ${acc.change.toFixed(2)})`);
+        
+        // Find LARGEST change among USER wallets
+        if (acc.change > tokenAmount) {
+          tokenAmount = acc.change;
+          tokenIncreased = acc.postAmount > acc.preAmount;
+          userAccount = acc.owner;
+          actualTokenMint = acc.pre?.mint || acc.post?.mint;
           
-          console.log(`    [DEBUG] 🎯 LARGEST USER WALLET CHANGE: ${change.toFixed(2)} tokens (${tokenIncreased ? 'USER BOUGHT ⬆️' : 'USER SOLD ⬇️'})`);
+          console.log(`    [DEBUG] 🎯 LARGEST USER CHANGE: ${acc.change.toFixed(2)} tokens`);
+          console.log(`    [DEBUG] 🎯 Balance: ${acc.preAmount.toFixed(2)} → ${acc.postAmount.toFixed(2)}`);
+          console.log(`    [DEBUG] 🎯 Direction: ${acc.postAmount > acc.preAmount ? '⬆️ INCREASED' : '⬇️ DECREASED'}`);
+          console.log(`    [DEBUG] 🎯 tokenIncreased=${tokenIncreased} → ${tokenIncreased ? '🟢 BUY' : '🔴 SELL'}`);
         }
       }
 
@@ -663,7 +719,8 @@ export class RaydiumWebSocketListener extends EventEmitter {
             const change = Math.abs(postAmount - preAmount);
             
             // Only consider accounts that actually changed
-            if (change > 0.01 && preAmount < smallestBalance && preAmount > POOL_VAULT_THRESHOLD) {
+            // Don't use threshold - just find any account with significant balance
+            if (change > 0.01 && preAmount < smallestBalance && preAmount > 1000) {
               smallestBalance = preAmount;
               smallestVault = {
                 pre,
@@ -678,20 +735,30 @@ export class RaydiumWebSocketListener extends EventEmitter {
         }
         
         if (smallestVault) {
-          // INVERT the signal: pool vault GAINS tokens = user SOLD (gave tokens to pool)
-          // pool vault LOSES tokens = user BOUGHT (took tokens from pool)
+          // CRITICAL UNDERSTANDING: We're looking at POOL's token vault
+          // Pool token vault change tells us what happened from POOL's perspective
+          // 
+          // USER BUYS:  User gives SOL → Pool gains SOL | User takes tokens → Pool LOSES tokens
+          // USER SELLS: User gives tokens → Pool GAINS tokens | User takes SOL → Pool loses SOL
+          //
+          // So pool vault token change is OPPOSITE of user's action:
+          // Pool GAINED tokens = User SOLD (gave tokens away)
+          // Pool LOST tokens = User BOUGHT (took tokens)
           tokenAmount = smallestVault.change;
-          // CRITICAL: tokenIncreased represents USER's perspective, not pool's
-          // If pool gained tokens (post > pre) → user SOLD → tokenIncreased should be FALSE
-          // If pool lost tokens (post < pre) → user BOUGHT → tokenIncreased should be TRUE
-          tokenIncreased = smallestVault.postAmount < smallestVault.preAmount; // Pool lost = user bought
+          
+          // Pool gained tokens means user gave tokens away (SOLD)
+          // Pool lost tokens means user took tokens (BOUGHT)
+          const poolGainedTokens = smallestVault.postAmount > smallestVault.preAmount;
+          tokenIncreased = !poolGainedTokens; // INVERT: Pool gained = user lost (SOLD)
+          
           userAccount = smallestVault.owner;
           actualTokenMint = smallestVault.pre.mint;
+          usedPoolVaultFallback = true; // Mark that we used pool vault (userAccount is POOL's account!)
           
           console.log(`    [DEBUG] 🔄 Using INVERTED pool vault signal:`);
           console.log(`    [DEBUG] Pool vault: ${smallestVault.preAmount.toFixed(0)} → ${smallestVault.postAmount.toFixed(0)}`);
-          console.log(`    [DEBUG] Pool ${smallestVault.postAmount > smallestVault.preAmount ? 'GAINED' : 'LOST'} ${smallestVault.change.toFixed(2)} tokens`);
-          console.log(`    [DEBUG] User perspective: ${tokenIncreased ? 'BOUGHT' : 'SOLD'} ${smallestVault.change.toFixed(2)} tokens`);
+          console.log(`    [DEBUG] Pool ${poolGainedTokens ? 'GAINED' : 'LOST'} ${smallestVault.change.toFixed(2)} tokens`);
+          console.log(`    [DEBUG] ⚠️ User ${tokenIncreased ? 'BOUGHT (took from pool)' : 'SOLD (gave to pool)'} ${smallestVault.change.toFixed(2)} tokens`);
         } else {
           console.log(`⚠️ [RaydiumWS] parseTransfers - No valid pool vault found either`);
           
@@ -709,41 +776,144 @@ export class RaydiumWebSocketListener extends EventEmitter {
       // Get SOL balance changes (lamports to SOL)
       const preBalances = meta.preBalances || [];
       const postBalances = meta.postBalances || [];
+      const accountKeys = tx.transaction?.message?.accountKeys || [];
       
       let maxSolChange = 0;
       let solSignerIndex = -1;
+      let userWalletIndex = -1;
 
-      // Find the account with largest SOL change (usually the user/signer)
-      // Exclude program accounts and focus on user wallet
+      // CRITICAL: Find the user's wallet address (from token account owner)
+      // BUT: If we used pool vault fallback, userAccount is the POOL's account, not the real user!
+      // In that case, we should NOT try to match it as "user wallet"
+      
+      if (userAccount && accountKeys.length > 0 && !usedPoolVaultFallback) {
+        userWalletIndex = accountKeys.findIndex((key: any) => {
+          const keyStr = typeof key === 'string' ? key : key.pubkey?.toString() || '';
+          return keyStr.toLowerCase() === userAccount.toLowerCase();
+        });
+        
+        if (userWalletIndex >= 0) {
+          console.log(`    [DEBUG] ✅ Found user wallet at index ${userWalletIndex}: ${userAccount.substring(0, 16)}...`);
+        } else {
+          console.log(`    [DEBUG] ⚠️ User wallet not found in accountKeys, will detect largest SOL change`);
+        }
+      } else if (usedPoolVaultFallback) {
+        console.log(`    [DEBUG] ⚠️ Used pool vault fallback - userAccount is POOL's account (${userAccount.substring(0, 16)}...), not real user`);
+        console.log(`    [DEBUG] ⚠️ Will NOT match as 'user wallet' - will find actual user's SOL change instead`);
+        userWalletIndex = -1; // Force it to NOT match
+      }
+
+      // Find ALL accounts with significant SOL changes and check their direction
+      const solChanges: Array<{
+        index: number, 
+        change: number, 
+        decreased: boolean,
+        isUserWallet: boolean,
+        preBalance: number,
+        postBalance: number
+      }> = [];
+      
       for (let i = 0; i < preBalances.length; i++) {
+        if (!preBalances[i] || !postBalances[i]) continue;
+        
         const changeInLamports = Math.abs(postBalances[i] - preBalances[i]);
         
-        // Skip if change is too small (likely fee payer, not trader)
+        // Skip only very tiny changes (fees/rent) - lowered to catch more trades
         if (changeInLamports < 1000000) continue; // < 0.001 SOL
         
-        if (changeInLamports > maxSolChange * 1e9) {
-          maxSolChange = changeInLamports / 1e9;
-          solSignerIndex = i;
+        solChanges.push({
+          index: i,
+          change: changeInLamports / 1e9,
+          decreased: postBalances[i] < preBalances[i],
+          isUserWallet: i === userWalletIndex,
+          preBalance: preBalances[i] / 1e9,
+          postBalance: postBalances[i] / 1e9
+        });
+      }
+      
+      // Sort by change amount (largest first)
+      solChanges.sort((a, b) => b.change - a.change);
+      
+      console.log(`    [DEBUG] Found ${solChanges.length} accounts with significant SOL changes`);
+      for (let i = 0; i < Math.min(3, solChanges.length); i++) {
+        const sc = solChanges[i];
+        console.log(`    [DEBUG] Account ${sc.index}: ${sc.preBalance.toFixed(4)} → ${sc.postBalance.toFixed(4)} SOL (${sc.decreased ? 'DECREASED ⬇️' : 'INCREASED ⬆️'} ${sc.change.toFixed(4)}) ${sc.isUserWallet ? '← USER WALLET ✅' : ''}`);
+      }
+      
+      // PRIORITY: Use matched user wallet if available
+      const userWalletChange = solChanges.find(c => c.isUserWallet);
+      if (userWalletChange) {
+        maxSolChange = userWalletChange.change;
+        solSignerIndex = userWalletChange.index;
+        console.log(`    [DEBUG] 🎯 USING MATCHED USER WALLET (index ${solSignerIndex}): ${maxSolChange.toFixed(6)} SOL`);
+      } 
+      // FALLBACK: Smart selection based on token direction
+      // If tokens INCREASED (user bought) → find SOL that DECREASED (user spent SOL)
+      // If tokens DECREASED (user sold) → find SOL that INCREASED (user received SOL)
+      else if (solChanges.length > 0) {
+        const targetDirection = tokenIncreased ? 'decreased' : 'increased';
+        
+        // Find account matching the expected pattern
+        const matchingAccount = solChanges.find(sc => 
+          tokenIncreased ? sc.decreased : !sc.decreased
+        );
+        
+        if (matchingAccount) {
+          maxSolChange = matchingAccount.change;
+          solSignerIndex = matchingAccount.index;
+          console.log(`    [DEBUG] 🎯 SMART MATCH: Tokens ${tokenIncreased ? 'UP' : 'DOWN'} → Using SOL that ${matchingAccount.decreased ? 'DECREASED' : 'INCREASED'} (index ${solSignerIndex}): ${maxSolChange.toFixed(6)} SOL`);
+        } else {
+          // Fallback to largest if no pattern match
+          maxSolChange = solChanges[0].change;
+          solSignerIndex = solChanges[0].index;
+          console.log(`    [DEBUG] ⚠️ NO PATTERN MATCH, using largest SOL change (index ${solSignerIndex}): ${maxSolChange.toFixed(6)} SOL`);
         }
       }
 
       const solAmount = maxSolChange;
 
-      // Determine buy vs sell using TOKEN balance changes (more reliable)
-      // If token increased (user received tokens) = BUY
-      // If token decreased (user gave away tokens) = SELL
-      const isBuy = tokenIncreased;
+      //   FINAL DETERMINATION: Cross-validate BOTH token AND SOL signals
+      //   USER perspective (what we want):
+      //   BUY:  tokens UP ⬆️ + SOL DOWN ⬇️ (user spent SOL, got tokens)
+      //   SELL: tokens DOWN ⬇️ + SOL UP ⬆️ (user spent tokens, got SOL)
+      //   POOL perspective (inverted - what we DON'T want):
+      //   User BUY:  pool tokens DOWN ⬇️ + pool SOL UP ⬆️ (pool gave tokens, got SOL)
+      //   User SELL: pool tokens UP ⬆️ + pool SOL DOWN ⬇️ (pool got tokens, gave SOL)
       
-      // Debug buy/sell detection
-      if (solSignerIndex >= 0) {
+      let isBuy: boolean;
+      
+      if (solSignerIndex >= 0 && preBalances[solSignerIndex] && postBalances[solSignerIndex]) {
         const solDecreased = postBalances[solSignerIndex] < preBalances[solSignerIndex];
+        
         console.log(`\n💰 [RaydiumWS] BUY/SELL Detection:`);
         console.log(`   Token Balance Change: ${tokenIncreased ? '⬆️ INCREASED' : '⬇️ DECREASED'} by ${tokenAmount.toFixed(2)} tokens`);
         console.log(`   SOL Balance Before: ${(preBalances[solSignerIndex] / 1e9).toFixed(6)} SOL`);
         console.log(`   SOL Balance After:  ${(postBalances[solSignerIndex] / 1e9).toFixed(6)} SOL`);
         console.log(`   SOL Change: ${solAmount.toFixed(6)} SOL (${solDecreased ? 'decreased ⬇️' : 'increased ⬆️'})`);
-        console.log(`   Direction: ${isBuy ? '🟢 BUY (received tokens)' : '🔴 SELL (gave away tokens)'}`);
+        console.log(`   Using account index: ${solSignerIndex} ${solSignerIndex === userWalletIndex ? '(MATCHED USER WALLET ✅)' : '(LARGEST CHANGE)'}`);
+        
+        // CROSS-VALIDATE: Token and SOL should move in opposite directions for USER
+        // USER BUY: Tokens UP ⬆️ + SOL DOWN ⬇️ (user spent SOL, got tokens)
+        // USER SELL: Tokens DOWN ⬇️ + SOL UP ⬆️ (user spent tokens, got SOL)
+        const signalsAgree = (tokenIncreased && solDecreased) || (!tokenIncreased && !solDecreased);
+        
+        if (signalsAgree) {
+          // Signals agree - use SOL as primary (most reliable)
+          isBuy = solDecreased;
+          console.log(`   ✅ Signals AGREE: Tokens ${tokenIncreased ? 'UP' : 'DOWN'} + SOL ${solDecreased ? 'DOWN' : 'UP'}`);
+        } else {
+          // Signals DISAGREE - we likely have pool account, use token direction
+          isBuy = tokenIncreased;
+          console.log(`   ⚠️ Signals DISAGREE: Tokens ${tokenIncreased ? 'UP' : 'DOWN'} + SOL ${solDecreased ? 'DOWN' : 'UP'}`);
+          console.log(`   🔄 Using TOKEN direction (likely pool SOL account detected)`);
+        }
+        
+        console.log(`   Final determination: ${isBuy ? '🟢 BUY' : '🔴 SELL'}`);
         console.log(`   ✅ Final Determination: ${isBuy ? 'BUY' : 'SELL'}\n`);
+      } else {
+        // Fallback to token balance change if SOL info not available
+        isBuy = tokenIncreased;
+        console.log(`\n⚠️ [RaydiumWS] No SOL info, using token change: ${isBuy ? 'BUY' : 'SELL'}\n`);
       }
 
       // Get user public key
@@ -757,11 +927,25 @@ export class RaydiumWebSocketListener extends EventEmitter {
       }
 
       if (solAmount > 0.0001 && tokenAmount > 0) { // Minimum threshold
+        // VALIDATION: Check if SOL amount seems reasonable
+        const impliedPrice = solAmount / tokenAmount;
+        const usdValue = solAmount * 140; // Approximate SOL price
+        
         console.log(`🔍 [RaydiumWS] ===== FINAL TRADE DETERMINATION =====`);
         console.log(`   tokenIncreased: ${tokenIncreased} (user's token balance ${tokenIncreased ? 'INCREASED' : 'DECREASED'})`);
         console.log(`   isBuy: ${isBuy} (this means user ${isBuy ? 'BOUGHT tokens' : 'SOLD tokens'})`);
         console.log(`   tokenAmount: ${tokenAmount.toFixed(2)}`);
         console.log(`   solAmount: ${solAmount.toFixed(6)}`);
+        console.log(`   Implied price: ${impliedPrice.toFixed(9)} SOL/token`);
+        console.log(`   USD value: ~$${usdValue.toFixed(2)}`);
+        
+        // Warn if SOL amount seems too small (< $1 for > 1000 tokens)
+        if (tokenAmount > 1000 && usdValue < 1) {
+          console.warn(`   ⚠️ WARNING: SOL amount seems too small for ${tokenAmount.toFixed(0)} tokens!`);
+          console.warn(`   ⚠️ This might be a fee or rent payment, not the actual trade`);
+          console.warn(`   ⚠️ Consider checking all SOL changes to find the real trade amount`);
+        }
+        
         console.log(`   Returning isBuy=${isBuy} to RealTradeFeedService`);
         console.log(`===========================================\n`);
         
