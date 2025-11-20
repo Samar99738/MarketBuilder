@@ -1039,12 +1039,13 @@ export class StrategyExecutionManager {
     }
     
     // Register strategy filter for intelligent trade filtering
-    // Extract trigger and side from strategy config
-    const strategyConfig = strategy.metadata?.config || {};
-    const trigger = strategyConfig.trigger || 'mirror_buy_activity';
-    const side = strategyConfig.side || 'sell';
+    // Extract trigger and side from strategy config stored in variables
+    const strategyConfig = strategy.variables?._strategyConfig || {};
+    const trigger = strategyConfig.trigger || 'mirror_sell_activity'; // FIXED: Default should be mirror_sell for buy strategies
+    const side = strategyConfig.side || 'buy'; // FIXED: Default should be buy
     
     console.log(`[StrategyExecutionManager] 🎯 Registering filter: trigger=${trigger}, side=${side}`);
+    console.log(`[StrategyExecutionManager] 🔍 Strategy config:`, strategyConfig);
     this.realTradeFeed.registerStrategyFilter(tokenAddress, trigger, side);
     
     // Normalize to lowercase ONLY for event matching (listening to emitted events)
@@ -1162,9 +1163,22 @@ export class StrategyExecutionManager {
         const event = events.shift()!;
         const execution = this.runningStrategies.get(runningId);
         
-        if (!execution || execution.status !== 'running') {
+        if (!execution) {
+          console.log(`⚠️ [EXEC QUEUE] No execution found for ${runningId}`);
           continue;
         }
+        
+        // FIXED: Allow event processing for reactive strategies even if status isn't "running"
+        // Reactive strategies may be in "waiting" state but still need to process events
+        const strategy = strategyBuilder.getStrategy(execution.strategyId);
+        const isReactive = strategy?.name?.includes('Reactive') || strategy?.name?.includes('Mirror');
+        
+        if (execution.status !== 'running' && !isReactive) {
+          console.log(`⚠️ [EXEC QUEUE] Strategy ${runningId} not running (status: ${execution.status})`);
+          continue;
+        }
+        
+        console.log(`✅ [EXEC QUEUE] Processing event for ${isReactive ? 'REACTIVE' : 'NORMAL'} strategy ${runningId}`);
 
         // Execute immediately without delay
         await this.executeImmediateAction(execution, event);

@@ -1543,17 +1543,30 @@ export function createReactiveMirrorStrategy(config: {
   console.log(`🎯 [TRIGGER SETUP] User wants to ${config.side.toUpperCase()} when they detect ${triggerAction.toUpperCase()} activity`);
   console.log(`🎯 [TRIGGER SETUP] We will watch for "${triggerAction}" trades and execute "${config.side}" orders`);
   
-  // Validate user provided amount - NO DEFAULTS!
-  if (!isSellStrategy && (!config.buyAmount || config.buyAmount <= 0)) {
-    throw new Error('buyAmount is required and must be greater than 0. Please specify the SOL amount to buy.');
+  // Validate amount ONLY for fixed-size strategies (not mirror mode)
+  const isMirrorMode = config.sizingRule === 'mirror_volume' || 
+                       config.sizingRule === 'mirror_buy_volume' || 
+                       config.sizingRule === 'mirror_sell_volume';
+  
+  if (!isSellStrategy && !isMirrorMode && (!config.buyAmount || config.buyAmount <= 0)) {
+    throw new Error('buyAmount is required for fixed-amount strategies. Please specify the SOL amount or use mirror_volume for dynamic sizing.');
   }
 
-  const buyAmount = config.buyAmount;
+  const buyAmount = config.buyAmount || 0.001; // Default for mirror mode (will be overridden by detected volume)
 
   const strategy = strategyBuilder.createStrategy(
     config.id,
     `Reactive Mirror ${actionName} Strategy`,
-    `${config.description} - Monitors for ${triggerAction} activity and mirrors with ${config.side} orders`
+    `${config.description} - Monitors for ${triggerAction} activity and mirrors with ${config.side} orders`,
+    {
+      // Store strategy config in variables for later access
+      _strategyConfig: {
+        trigger: config.trigger,
+        side: config.side,
+        sizingRule: config.sizingRule,
+        tokenAddress: config.tokenAddress
+      }
+    }
   );
 
   strategyBuilder.updateRiskLimits(config.id, {
@@ -1652,13 +1665,26 @@ export function createReactiveMirrorStrategy(config: {
           console.log(`🔔 ================================================\n`);
 
           // Check if this trade matches our trigger
-          console.log(`🎯 [TRIGGER CHECK] Detected trade type: "${tradeType}", Looking for: "${triggerAction}"`);
-          console.log(`🎯 [TRIGGER CHECK] Strategy side: "${config.side}", Sizing: "${config.sizingRule}"`);
+          console.log(`\n🎯 ========== TRIGGER MATCHING ==========`);
+          console.log(`🎯 Detected trade type: "${tradeType}"`);
+          console.log(`🎯 Looking for: "${triggerAction}"`);
+          console.log(`🎯 Strategy side: "${config.side}"`);
+          console.log(`🎯 Sizing rule: "${config.sizingRule}"`);
+          console.log(`🎯 Config trigger: "${config.trigger}"`);
+          
           const shouldTrigger = (triggerAction === tradeType);
-          console.log(`🎯 [TRIGGER CHECK] Match result: ${shouldTrigger ? '✅ MATCHED' : '❌ NO MATCH'}`);
+          console.log(`🎯 Comparison: "${triggerAction}" === "${tradeType}" = ${shouldTrigger}`);
+          console.log(`🎯 Match result: ${shouldTrigger ? '✅ ✅ ✅ MATCHED - WILL EXECUTE!' : '❌ NO MATCH - IGNORING'}`);
+          console.log(`🎯 ====================================\n`);
 
           if (shouldTrigger) {
-            console.log(`✅ TRIGGER MATCHED! Executing ${config.side} order\n`);
+            console.log(`\n✅ ========== TRIGGER MATCHED! ==========`);
+            console.log(`✅ Executing ${config.side.toUpperCase()} order`);
+            console.log(`✅ Trade details:`);
+            console.log(`✅   - SOL Amount: ${tradeSolAmount.toFixed(4)}`);
+            console.log(`✅   - Token Amount: ${tradeTokenAmount ? tradeTokenAmount.toLocaleString() : 'N/A'}`);
+            console.log(`✅   - Price: ${tradePrice}`);
+            console.log(`✅ ====================================\n`);
 
             // CRITICAL FIX: Reset flag IMMEDIATELY after detection
             // This allows multiple rapid BUY trades to each trigger execution

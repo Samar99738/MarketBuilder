@@ -21,6 +21,8 @@ import { marketDataProvider } from './MarketDataProvider';
 import { awsLogger } from '../../aws/logger';
 import { ENV_CONFIG } from '../../config/environment';
 import { timeStamp } from 'console';
+import { symbol } from 'zod';
+import { token } from '@coral-xyz/anchor/dist/cjs/utils';
 
 const SOL_ADDRESS = 'So11111111111111111111111111111111111111112';
 
@@ -295,16 +297,24 @@ export class PaperTradingEngine {
     // Emit initial balance to UI immediately after session creation
     if (this.io) {
       const positions = Array.from((portfolio as any).positions?.values() || []);
+      const firstPosition = positions[0] as any;
+      const tokenSymbol = firstPosition?.tokenSymbol || 'USDC';
+      const tokenBalance = firstPosition?.amount || 0;
+      
       const initialBalanceEvent = {
         sessionId,
+        balanceSOL: mergedConfig.initialBalanceSOL,
+        balanceUSDC: mergedConfig.initialBalanceUSDC,
+        balanceTokens: tokenBalance,
+        totalValueUSD: mergedConfig.initialBalanceSOL * 100 + mergedConfig.initialBalanceUSDC, // Rough estimate
+        roi: 0,
+        totalPnLUSD: 0,
+        primaryToken: {
+          address: tokenAddress || 'none',
+          symbol: tokenSymbol,
+          balance: tokenBalance
+        },
         timestamp: Date.now(),
-        balanceSOL: state.portfolio.balanceSOL,
-        balanceUSDC: state.portfolio.balanceUSDC,
-        balanceTokens: state.portfolio.balanceTokens,
-        totalValueUSD: state.metrics.totalValueUSD,
-        roi: state.metrics.roi,
-        totalPnL: state.metrics.totalPnL,
-        totalPnLUSD: state.metrics.totalPnLUSD,
         positions: positions,
         isInitialState: true
       };
@@ -482,6 +492,10 @@ export class PaperTradingEngine {
           totalValueUSD: state.metrics.totalValueUSD,
         };
 
+        // ENHANCED: Get token-specific date
+        const position = portfolio.getPosition(tokenAddress);
+        const tokenSymbol = marketData.tokenSymbol || 'TOKEN';
+
         const balanceUpdateEvent = {
           sessionId,
           timestamp: Date.now(),
@@ -509,6 +523,15 @@ export class PaperTradingEngine {
             tokenDelta: balanceAfter.tokens - balanceBefore.tokens,
             totalValueDeltaUSD: balanceAfter.totalValueUSD - balanceBefore.totalValueUSD,
           },
+
+          // NEW: Primary token info for UI
+          primaryToken: {
+            address: tokenAddress,
+            symbol: tokenSymbol,
+            balance: balanceAfter.tokens,
+            balanceBefore: balanceBefore.tokens,
+            balanceDelta: balanceAfter.tokens - balanceBefore.tokens,
+          },
           
           // Available capital
           availableCapital: {
@@ -524,7 +547,20 @@ export class PaperTradingEngine {
             tokensReceived: tokensReceived,
             fees: tradingFee + networkFee,
             slippage: slippageAmount,
+            tokenSymbol: tokenSymbol,
+            executionPrice: executionPrice,
           },
+
+          // NEW: Token Positioins
+          tokenPositions: position ? [{
+            tokenAddress: position.tokenAddress,
+            tokenSymbol: position.tokenSymbol || tokenSymbol,
+            amount: position.amount,
+            valueSOL: position.currentValueSOL,
+            valueUSD: position.currentValueSOL,
+            unrealizedPnL: position.unrealizedPnL,
+            unrealizedPnLPercentage: position.unrealizedPnLPercentage,
+          }] : [],
         };
 
         this.io.emit('paper:balance:update', balanceUpdateEvent);
@@ -1475,14 +1511,36 @@ export class PaperTradingEngine {
       
       // Emit balance update to UI immediately after auto-init
       if (this.io) {
+        const positions = Array.from((portfolio as any).Positioins?.values() || []);
+        const tokenSymbols = marketData.tokenSymbol || 'TOKEN';
+        
         const balanceUpdateEvent = {
           sessionId,
           timestamp: Date.now(),
           balanceSOL: state.portfolio.balanceSOL,
           balanceUSDC: state.portfolio.balanceUSDC,
           balanceTokens: autoInitTokens,
+
+          // NEW: Primary token info
+          primaryToken: {
+            address: tokenAddress,
+            symbol: tokenSymbols,
+            balance: autoInitTokens
+          },
+
+          // NEW: TOKEN positions
+          tokenPositions: positions.map((pos: any) => ({
+            tokenAddress: pos.tokenAddress,
+            tokenSymbol: pos.tokenSymbol || pos.tokenSymbol,
+            amount: pos.amount,
+            valueSOL: pos.currentValueSOL || 0,
+            valueUSD: pos.currentValueUSD || 0,
+            unrealizedPnL: pos.unrealizedPnL || 0,
+          })),
+          
           totalValueUSD: state.portfolio.balanceSOL * solPriceUSD,
-          positions: Array.from((portfolio as any).positions?.values() || [])
+          positions: positions,
+          isAutoInit: true 
         };
         this.io.emit('paper:balance:update', balanceUpdateEvent);
         console.log(`📡 [WebSocket] Emitted balance update after auto-init`);
@@ -1611,6 +1669,10 @@ export class PaperTradingEngine {
           totalValueUSD: state.metrics.totalValueUSD,
         };
 
+        // ENHANCED: Get token-specific data (may be null if fully closed)
+        const position = portfolio.getPosition(tokenAddress);
+        const tokenSymbol = marketData.tokenSymbol || 'TOKEN';
+
         const balanceUpdateEvent = {
           sessionId,
           timestamp: Date.now(),
@@ -1638,6 +1700,15 @@ export class PaperTradingEngine {
             tokenDelta: balanceAfter.tokens - balanceBefore.tokens,
             totalValueDeltaUSD: balanceAfter.totalValueUSD - balanceBefore.totalValueUSD,
           },
+
+          // NEW: Primiary token info for UI
+          primaryToken: {
+            address: tokenAddress,
+            symbol: tokenSymbol,
+            balance: balanceAfter.tokens,
+            balanceBefore: balanceBefore.tokens,
+            balanceDelta: balanceAfter.tokens - balanceBefore.tokens,
+          },
           
           // Available capital
           availableCapital: {
@@ -1655,7 +1726,20 @@ export class PaperTradingEngine {
             slippage: slippageAmount,
             realizedPnL: realizedPnL,
             realizedPnLUSD: realizedPnLUSD,
+            tokenSymbol: tokenSymbol,
+            executionPrice: executionPrice,
           },
+
+          // NEW: Token position (empty if fully closed)
+          tokenPositions: position ? [{
+            tokenAddress: position.tokenAddress,
+            tokenSymbol: position.tokenSymbol || tokenSymbol,
+            amount: position.amount,
+            valueSOL: position.currentValueSOL,
+            valueUSD: position.currentValueUSD,
+            unrealizedPnL: position.unrealizedPnL,
+            unrealizedPnLPercentage: position.unrealizedPnLPercentage,
+          }] : [], // Empty array if no position
         };
 
         this.io.emit('paper:balance:update', balanceUpdateEvent);

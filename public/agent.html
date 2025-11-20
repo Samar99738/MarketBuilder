@@ -97,22 +97,37 @@
                     </div>
 
                     <!-- Paper Trading Metrics -->
-                    <div class="paper-metrics" id="paperMetrics" style="margin-top: 12px;">
-                        <div class="metric-row">
-                            <span class="metric-label">Virtual Balance:</span>
-                            <span class="metric-value" id="paperBalance">10.00 SOL</span>
+                    <div class="virtual-balance-section">
+                        <!-- SOL Balance -->
+                        <div class="balance-item">
+                            <span class="icon">◎</span>
+                            <span id="balance-sol" class="value">10.0000</span>
+                            <span class="label">SOL</span>
                         </div>
-                        <div class="metric-row">
-                            <span class="metric-label">Total P&L:</span>
-                            <span class="metric-value profit" id="paperPnL">+0.00 SOL</span>
+
+                        <span class="separator">/</span>
+
+                        <!-- Token Balance (Dynamic) -->
+                        <div class="balance-item">
+                            <span class="icon">🪙</span>
+                            <span id="balance-token" class="value">0.00</span>
+                            <span id="token-label" class="label">USDC</span>
                         </div>
-                        <div class="metric-row">
-                            <span class="metric-label">ROI:</span>
-                            <span class="metric-value" id="paperROI">0.00%</span>
-                        </div>
-                        <div class="metric-row">
-                            <span class="metric-label">Trades:</span>
-                            <span class="metric-value" id="paperTrades">0</span>
+
+                        <!-- Optional: Metrics -->
+                        <div class="metrics">
+                            <div class="metric">
+                                <span class="label">Total:</span>
+                                <span id="total-value-usd">$0.00</span>
+                            </div>
+                            <div class="metric">
+                                <span class="label">ROI:</span>
+                                <span id="roi" class="neutral">0.00%</span>
+                            </div>
+                            <div class="metric">
+                                <span class="label">P&L:</span>
+                                <span id="total-pnl" class="neutral">$0.00</span>
+                            </div>
                         </div>
                     </div>
 
@@ -142,7 +157,8 @@
                         <!-- Token Information Tool -->
                         <div class="mcp-tool-item">
                             <div class="mcp-tool-toggle">
-                                <input type="checkbox" id="tool-getTokenInfo" class="mcp-tool-checkbox" checked onchange="handleToolToggle('getTokenInfo', this.checked)">
+                                <input type="checkbox" id="tool-getTokenInfo" class="mcp-tool-checkbox" checked
+                                    onchange="handleToolToggle('getTokenInfo', this.checked)">
                                 <label for="tool-getTokenInfo" class="mcp-tool-slider"></label>
                             </div>
                             <div class="mcp-tool-info">
@@ -154,7 +170,8 @@
                         <!-- Buy Token Tool -->
                         <div class="mcp-tool-item">
                             <div class="mcp-tool-toggle">
-                                <input type="checkbox" id="tool-buyToken" class="mcp-tool-checkbox" checked onchange="handleToolToggle('buyToken', this.checked)">
+                                <input type="checkbox" id="tool-buyToken" class="mcp-tool-checkbox" checked
+                                    onchange="handleToolToggle('buyToken', this.checked)">
                                 <label for="tool-buyToken" class="mcp-tool-slider"></label>
                             </div>
                             <div class="mcp-tool-info">
@@ -166,7 +183,8 @@
                         <!-- Sell Token Tool -->
                         <div class="mcp-tool-item">
                             <div class="mcp-tool-toggle">
-                                <input type="checkbox" id="tool-sellToken" class="mcp-tool-checkbox" checked onchange="handleToolToggle('sellToken', this.checked)">
+                                <input type="checkbox" id="tool-sellToken" class="mcp-tool-checkbox" checked
+                                    onchange="handleToolToggle('sellToken', this.checked)">
                                 <label for="tool-sellToken" class="mcp-tool-slider"></label>
                             </div>
                             <div class="mcp-tool-info">
@@ -178,7 +196,8 @@
                         <!-- List Accounts Tool -->
                         <div class="mcp-tool-item">
                             <div class="mcp-tool-toggle">
-                                <input type="checkbox" id="tool-listAccounts" class="mcp-tool-checkbox" checked onchange="handleToolToggle('listAccounts', this.checked)">
+                                <input type="checkbox" id="tool-listAccounts" class="mcp-tool-checkbox" checked
+                                    onchange="handleToolToggle('listAccounts', this.checked)">
                                 <label for="tool-listAccounts" class="mcp-tool-slider"></label>
                             </div>
                             <div class="mcp-tool-info">
@@ -190,7 +209,8 @@
                         <!-- Get Account Balance Tool -->
                         <div class="mcp-tool-item">
                             <div class="mcp-tool-toggle">
-                                <input type="checkbox" id="tool-getAccountBalance" class="mcp-tool-checkbox" checked onchange="handleToolToggle('getAccountBalance', this.checked)">
+                                <input type="checkbox" id="tool-getAccountBalance" class="mcp-tool-checkbox" checked
+                                    onchange="handleToolToggle('getAccountBalance', this.checked)">
                                 <label for="tool-getAccountBalance" class="mcp-tool-slider"></label>
                             </div>
                             <div class="mcp-tool-info">
@@ -202,7 +222,8 @@
                         <!-- Create Account Tool -->
                         <div class="mcp-tool-item">
                             <div class="mcp-tool-toggle">
-                                <input type="checkbox" id="tool-createAccount" class="mcp-tool-checkbox" checked onchange="handleToolToggle('createAccount', this.checked)">
+                                <input type="checkbox" id="tool-createAccount" class="mcp-tool-checkbox" checked
+                                    onchange="handleToolToggle('createAccount', this.checked)">
                                 <label for="tool-createAccount" class="mcp-tool-slider"></label>
                             </div>
                             <div class="mcp-tool-info">
@@ -214,7 +235,8 @@
                         <!-- Import Account Tool -->
                         <div class="mcp-tool-item">
                             <div class="mcp-tool-toggle">
-                                <input type="checkbox" id="tool-importAccount" class="mcp-tool-checkbox" checked onchange="handleToolToggle('importAccount', this.checked)">
+                                <input type="checkbox" id="tool-importAccount" class="mcp-tool-checkbox" checked
+                                    onchange="handleToolToggle('importAccount', this.checked)">
                                 <label for="tool-importAccount" class="mcp-tool-slider"></label>
                             </div>
                             <div class="mcp-tool-info">
@@ -226,7 +248,8 @@
                         <!-- Get Transaction History Tool -->
                         <div class="mcp-tool-item">
                             <div class="mcp-tool-toggle">
-                                <input type="checkbox" id="tool-getTransactionHistory" class="mcp-tool-checkbox" checked onchange="handleToolToggle('getTransactionHistory', this.checked)">
+                                <input type="checkbox" id="tool-getTransactionHistory" class="mcp-tool-checkbox" checked
+                                    onchange="handleToolToggle('getTransactionHistory', this.checked)">
                                 <label for="tool-getTransactionHistory" class="mcp-tool-slider"></label>
                             </div>
                             <div class="mcp-tool-info">
@@ -238,7 +261,8 @@
                         <!-- Get Portfolio Summary Tool -->
                         <div class="mcp-tool-item">
                             <div class="mcp-tool-toggle">
-                                <input type="checkbox" id="tool-getPortfolioSummary" class="mcp-tool-checkbox" checked onchange="handleToolToggle('getPortfolioSummary', this.checked)">
+                                <input type="checkbox" id="tool-getPortfolioSummary" class="mcp-tool-checkbox" checked
+                                    onchange="handleToolToggle('getPortfolioSummary', this.checked)">
                                 <label for="tool-getPortfolioSummary" class="mcp-tool-slider"></label>
                             </div>
                             <div class="mcp-tool-info">
@@ -515,29 +539,29 @@
                 if (data.strategyId === currentStrategyId && data.data) {
                     // Update with enhanced data structure
                     const perfData = data.data;
-                    
+
                     // Extract metrics from enhanced structure
                     const metrics = {
                         totalExecutions: perfData.tradeStats?.totalExecutions || perfData.totalExecutions || 0,
                         totalProfitUSD: perfData.financials?.totalProfitUSD || perfData.totalProfitUSD || 0,
                         roi: perfData.roiMetrics?.roi || perfData.roi || 0,
                         winRate: perfData.tradeStats?.successRate || perfData.successRate || 0,
-                        
+
                         // Additional detailed metrics
                         realizedProfitUSD: perfData.financials?.realizedProfitUSD || 0,
                         unrealizedProfitUSD: perfData.financials?.unrealizedProfitUSD || 0,
                         totalFeesUSD: perfData.financials?.totalFeesUSD || 0,
                         feesPercentage: perfData.financials?.feesPercentage || 0,
-                        
+
                         // Timing info
                         durationMinutes: perfData.timing?.durationMinutes || 0,
                         executionsPerMinute: perfData.timing?.executionsPerMinute || 0,
-                        
+
                         // ROI projections
                         dailyROI: perfData.roiMetrics?.dailyROI || 0,
                         projectedMonthlyROI: perfData.roiMetrics?.projectedMonthlyROI || 0,
                     };
-                    
+
                     updateStrategyStatusFromPerformance(perfData);
                     updateLiveMetrics(metrics);
                 }
@@ -554,11 +578,11 @@
             // Listen for REAL pump.fun trades detected from blockchain
             socket.on('pumpfun:live_trade_detected', (trade) => {
                 console.log('🔥 [REAL TRADE DETECTED]', trade);
-                
+
                 // Extract token display name (prioritize symbol > name > shortened address)
-                const tokenDisplay = trade.tokenSymbol || trade.tokenName || 
+                const tokenDisplay = trade.tokenSymbol || trade.tokenName ||
                     (trade.tokenAddress ? `${trade.tokenAddress.substring(0, 4)}...${trade.tokenAddress.substring(trade.tokenAddress.length - 4)}` : 'Unknown');
-                
+
                 // Display in live feed with token info
                 const feedTrade = {
                     type: trade.type,
@@ -576,9 +600,9 @@
                     tokenName: trade.tokenName,
                     tokenDisplay: tokenDisplay // Add formatted token display
                 };
-                
+
                 addTradeToLiveFeed(feedTrade);
-                
+
                 // Enhanced notification with token info
                 const tradeDirection = trade.type === 'buy' ? '🟢 BUY' : '🔴 SELL';
                 showNotification(
@@ -619,7 +643,7 @@
                     };
 
                     let message = statusMessages[data.status];
-                    
+
                     // Add context if available
                     if (data.context && data.context.totalExecutions > 0) {
                         message += ` (${data.context.totalExecutions} trades, ${data.context.roi?.toFixed(2)}% ROI)`;
@@ -631,7 +655,7 @@
                 }
             });
 
-            // ✅ NEW: Listen for strategy:started event to show active strategy in right panel
+            // NEW: Listen for strategy:started event to show active strategy in right panel
             socket.on('strategy:started', (data) => {
                 console.log('🚀 [strategy:started] Strategy execution started:', data);
                 console.log('🚀 Running ID (full):', data.strategyId);
@@ -645,16 +669,20 @@
                 console.log('✅ [UI] currentStrategyId SET TO:', currentStrategyId);
                 console.log('✅ [UI] Type:', typeof currentStrategyId);
                 console.log('✅ [UI] Exists:', !!currentStrategyId);
-                
+
                 // Also store in localStorage as backup
                 if (currentStrategyId) {
                     localStorage.setItem('current_strategy_id', currentStrategyId);
                     console.log('💾 [UI] Stored strategy ID in localStorage');
                 }
-                
+
                 if (data.sessionId) {
                     currentPaperSessionId = data.sessionId;
                     console.log('🚀 Updated currentPaperSessionId:', currentPaperSessionId);
+                    
+                    // Reset virtual balance to initial state for new strategy
+                    initializeVirtualBalance();
+                    console.log('🔄 [BALANCE] Reset to initial state for new strategy');
                 }
 
                 // Show the strategy in the right panel
@@ -667,25 +695,25 @@
             // Listen for strategy stopped event
             socket.on('strategy:stopped', (data) => {
                 console.log('🛑 Strategy stopped event received:', data);
-                
+
                 if (currentStrategyId === data.runningId || currentStrategyId === data.strategyId) {
                     console.log('✅ Our strategy stopped, updating UI');
-                    
+
                     // Update strategy status panel
                     updateStrategyStatus('stopped', 'No Active Strategy', 0);
-                    
+
                     // Clear current strategy
                     currentStrategyId = null;
-                    
+
                     // Show notification
                     showNotification('✅ Strategy stopped successfully', 'success');
-                    
+
                     // Hide active strategy panel
                     const activeStrategyPanel = document.getElementById('activeStrategyPanel');
                     if (activeStrategyPanel) {
                         activeStrategyPanel.style.display = 'none';
                     }
-                    
+
                     // Show "No Active Strategy" message
                     const executionPanel = document.querySelector('.execution-panel-content');
                     if (executionPanel) {
@@ -798,24 +826,24 @@
                 const timeStr = timestamp.toLocaleTimeString();
 
                 const isBuy = (trade.type === 'buy' || trade.side === 'buy');
-                
+
                 // Display indicator for real blockchain trades
                 const blockchainIndicator = isRealBlockchain ? '🔴 REAL ' : '📊 ';
-                
+
                 // Display correct information based on trade type
                 let displayAmount, displayPrice, displayText;
-                
+
                 // Extract token display info (prioritize provided tokenDisplay, then symbol, then name, then shortened address)
-                const tokenDisplay = trade.tokenDisplay || trade.tokenSymbol || trade.tokenName || 
+                const tokenDisplay = trade.tokenDisplay || trade.tokenSymbol || trade.tokenName ||
                     (trade.tokenAddress ? `${trade.tokenAddress.substring(0, 4)}...${trade.tokenAddress.substring(trade.tokenAddress.length - 4)}` : 'Unknown Token');
-                
+
                 if (isBuy) {
                     // BUY: Show SOL spent → tokens received @ token price
                     const solSpent = trade.amountSOL || trade.amount || 0;
-                    
+
                     const tokensReceived = trade.amountTokens || trade.position?.size || trade.balanceDeltas?.tokenDelta || 0;
                     const tokenPrice = trade.priceUSD || trade.price || 0;
-                    
+
                     // Format token amount
                     let formattedTokens;
                     if (tokensReceived >= 1000000) {
@@ -827,7 +855,7 @@
                     } else {
                         formattedTokens = '0.00';
                     }
-                    
+
                     // Enhanced display with prominent token name
                     displayText = `<span style="font-weight: 700; color: #4ade80;">${tokenDisplay}</span>: ${solSpent.toFixed(4)} SOL → ${formattedTokens} tokens @ $${tokenPrice.toFixed(6)}`;
                 } else {
@@ -835,7 +863,7 @@
                     const tokenAmount = trade.amountTokens || trade.amount || 0;
                     const solReceived = trade.amountSOL || 0;
                     const tokenPrice = trade.priceUSD || trade.price || 0;
-                    
+
                     // Format token amount with K/M suffix for readability
                     let formattedTokenAmount;
                     if (tokenAmount >= 1000000) {
@@ -845,7 +873,7 @@
                     } else {
                         formattedTokenAmount = tokenAmount.toFixed(2);
                     }
-                    
+
                     // Enhanced display with prominent token name
                     displayText = `<span style="font-weight: 700; color: #ef4444;">${tokenDisplay}</span>: ${formattedTokenAmount} tokens → ${solReceived.toFixed(6)} SOL @ $${tokenPrice.toFixed(6)}`;
                 }
@@ -894,17 +922,17 @@
                 const timeStr = timestamp.toLocaleTimeString();
 
                 const isBuy = (simulation.type === 'buy' || simulation.side === 'buy');
-                
+
                 // Display correct information based on simulation type
                 let displayText;
-                
+
                 if (isBuy) {
                     // BUY: Show SOL spent → tokens received @ token price
                     const solSpent = simulation.amountSOL || simulation.amount || 0;
                     const tokensReceived = simulation.amountTokens || simulation.position?.size || simulation.balanceDeltas?.tokenDelta || 0;
                     const tokenPrice = simulation.priceUSD || simulation.price || 0;
                     const tokenSymbol = simulation.tokenSymbol || simulation.quoteToken || simulation.position?.tokenSymbol || 'TOKEN';
-                    
+
                     // Format token amount
                     let formattedTokens;
                     if (tokensReceived >= 1000000) {
@@ -916,7 +944,7 @@
                     } else {
                         formattedTokens = '0.00';
                     }
-                    
+
                     displayText = `${solSpent.toFixed(4)} SOL → ${formattedTokens} ${tokenSymbol} @ $${tokenPrice.toFixed(6)}`;
                 } else {
                     // SELL: Show tokens sold, SOL received, and price
@@ -924,7 +952,7 @@
                     const solReceived = simulation.amountSOL || 0;
                     const tokenPrice = simulation.priceUSD || simulation.price || 0;
                     const tokenSymbol = simulation.tokenSymbol || 'TOKEN';
-                    
+
                     // Format token amount with K/M suffix for readability
                     let formattedTokenAmount;
                     if (tokenAmount >= 1000000) {
@@ -934,7 +962,7 @@
                     } else {
                         formattedTokenAmount = tokenAmount.toFixed(2);
                     }
-                    
+
                     displayText = `${formattedTokenAmount} ${tokenSymbol} → ${solReceived.toFixed(6)} SOL @ $${tokenPrice.toFixed(6)}`;
                 }
 
@@ -1184,7 +1212,7 @@
                 console.log('🔍 [UI stopStrategy] Function called, currentStrategyId:', currentStrategyId);
                 console.log('🔍 [UI stopStrategy] Type:', typeof currentStrategyId);
                 console.log('🔍 [UI stopStrategy] Value:', currentStrategyId);
-                
+
                 // Try to recover from localStorage if currentStrategyId is null
                 if (!currentStrategyId) {
                     const savedStrategyId = localStorage.getItem('current_strategy_id');
@@ -1213,7 +1241,7 @@
                     // base strategyId: reactive-1761538241056
                     const runningId = currentStrategyId;
                     const baseStrategyId = runningId.split('-').slice(0, -1).join('-');
-                    
+
                     console.log('⏹️ Stopping strategy:', { runningId, baseStrategyId });
                     console.log('🔍 [UI stopStrategy] Making API call to:', `${API_BASE}/api/v1/strategies/${baseStrategyId}/stop`);
 
@@ -1226,7 +1254,7 @@
                             runningId: runningId // Send the FULL runningId in body
                         })
                     });
-                    
+
                     console.log('🔍 [UI stopStrategy] API response status:', response.status, response.statusText);
 
                     const data = await response.json();
@@ -1237,7 +1265,7 @@
                         updateStrategyStatus('idle');
                         const stoppedStrategyId = currentStrategyId;
                         currentStrategyId = null;
-                        
+
                         // Clear from localStorage
                         localStorage.removeItem('current_strategy_id');
                         console.log('🗑️ [UI stopStrategy] Cleared strategy ID from localStorage');
@@ -1589,7 +1617,7 @@
                 try {
                     // Get enabled MCP tools
                     const enabledTools = getEnabledTools();
-                    
+
                     // Call agent API
                     const response = await fetch('http://localhost:3000/api/agent/chat', {
                         method: 'POST',
@@ -2257,6 +2285,33 @@
                 // Update balance - check portfolio first, then metrics
                 const balanceSOL = portfolio.balanceSOL ?? metrics.currentBalanceSOL ?? 0;
                 const balanceUSDC = portfolio.balanceUSDC ?? metrics.currentBalanceUSD ?? 0;
+                const balanceTokens = portfolio.balanceTokens ?? metrics.currnetBalanceTokens ?? 0;
+
+                // ENHANCED: show token-specific balances if availble
+                let balanceText = '';
+                if (data.primaryToken && data.primaryToken.balance > 0) {
+                    // Display token balance
+                    const tokenSymbol = data.primaryToken.symbol || 'TOKEN';
+                    balanceText = `${balanceSOL.toFixed(4)} SOL / ${balanceUSDC.toLocaleString(undefined, {
+                        minimumFractionDigits: 2,
+                        maximumFractionDigits: 2
+                    })} ${tokenSymbol}`;
+                } else if (portfolio.positions && portfolio.positions.length > 0) {
+                    // Fallback: Try to get token from position array
+                    const firstPosition = portfolio.positions[0];
+                    if (firstPosition && firstPosition.amount > 0) {
+                        const tokenSymbol = firstPosition.tokenSymbol || 'TOKEN';
+                        balanceText = `${balanceSOL.toFixed(4)} SOL / ${firstPosition.amount.toLocaleString(undefined, {
+                            minimumFractionDigits: 2,
+                            maximumFractionDigits: 2
+                        })} ${tokenSymbol}`;
+                    } else {
+                        balanceText = `${balanceSOL.toFixed(4)} SOL / ${balanceUSDC.toFixed(2)} USDC`;
+                    }
+                } else {
+                    // Default: Show USDC
+                    balanceText = `${balanceSOL.toFixed(4)} SOL / ${balanceUSDC.toFixed(2)} USDC`;
+                }
 
                 document.getElementById('paperBalance').textContent =
                     `${balanceSOL.toFixed(4)} SOL / ${balanceUSDC.toFixed(2)} USDC`;
@@ -2293,8 +2348,8 @@
                     winningTrades: metrics.winningTrades || 0,
                     losingTrades: metrics.losingTrades || 0,
                     totalFeesUSD: metrics.totalFeesUSD || 0,
-                    executionsPerMin: metrics.duration > 0 
-                        ? (metrics.totalTrades / (metrics.duration / 60000)) 
+                    executionsPerMin: metrics.duration > 0
+                        ? (metrics.totalTrades / (metrics.duration / 60000))
                         : 0
                 });
             }
@@ -2416,7 +2471,7 @@
                     if (!data.metrics) {
                         // Try to extract metrics from different possible locations
                         data.metrics = data.data?.metrics || data.session?.metrics || null;
-                        
+
                         if (!data.metrics) {
                             // Check if metrics are flattened at top level (NEW production-ready format)
                             if (data.winRate !== undefined || data.profitFactor !== undefined || data.totalTrades !== undefined) {
@@ -2446,14 +2501,14 @@
                             }
                         }
                     }
-                    
+
                     // Store metrics in a single source of truth
                     const tradeMetrics = {
                         executions: data.metrics.totalTrades || 0,
                         pnl: data.metrics.totalPnLUSD || data.metrics.totalPnL || 0,
                         roi: data.metrics.roi || data.metrics.totalPnLPercentage || 0,
                         winRate: data.metrics.winRate || 0,
-                        
+
                         // Enhanced metrics
                         profitFactor: data.metrics.profitFactor || 0,
                         sharpeRatio: data.metrics.sharpeRatio || 0,
@@ -2498,7 +2553,7 @@
                         priceUSD: data.priceUSD,
                         tokenSymbol: data.tokenSymbol || data.quoteToken || data.position?.tokenSymbol || data.baseToken || 'TOKEN', // Try tokenSymbol first, then quoteToken
                         timestamp: data.timestamp || Date.now(),
-                        
+
                         // Enhanced trade info
                         executionTimeMs: data.executionTimeMs,
                         fees: data.fees,
@@ -2506,7 +2561,7 @@
                         position: data.position,
                         balanceDeltas: data.balanceDeltas, // Include balance deltas
                     };
-                    
+
                     console.log('🔍 [DEBUG] tradeForFeed being sent to display:', tradeForFeed);
                     console.log('🔍 [DEBUG] amountTokens sources:', {
                         'data.amountTokens': data.amountTokens,
@@ -2515,14 +2570,14 @@
                         'data.balanceDeltas?.tokenDelta': data.balanceDeltas?.tokenDelta,
                         'FINAL amountTokens': tradeForFeed.amountTokens
                     });
-                    
+
                     // IMPORTANT: Check if user is trying to buy SOL with SOL (invalid)
                     if (data.tokenSymbol === 'SOL' && data.side === 'buy') {
                         console.warn('⚠️ WARNING: Attempting to buy SOL with SOL. This is invalid!');
                         console.warn('⚠️ You need to specify a real token address (like a meme coin) in your strategy.');
                         console.warn('⚠️ Example: "Token Address: EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v"');
                     }
-                    
+
                     addTradeToLiveFeed(tradeForFeed);
 
                     // Show detailed notification
@@ -2532,7 +2587,7 @@
                     const symbol = data.baseToken;
                     const roi = tradeMetrics.roi.toFixed(2);
                     const executionTime = data.executionTimeMs ? ` in ${data.executionTimeMs}ms` : '';
-                    
+
                     showNotification(
                         `📊 Paper ${tradeType}: ${amount} ${symbol} ${amountUSD}${executionTime}\n` +
                         `ROI: ${roi}% | Win Rate: ${tradeMetrics.winRate.toFixed(1)}% | P&L: $${tradeMetrics.pnl.toFixed(2)}`,
@@ -2545,7 +2600,7 @@
                 if (data.sessionId === currentPaperSessionId) {
                     console.log('📊 paper:metrics:update received:', data.metrics);
                     updatePaperTradingMetrics(data.metrics);
-                    
+
                     // CRITICAL FIX: Update Advanced Metrics and RIGHT panel from metrics update
                     if (data.metrics) {
                         // Update RIGHT panel with correct metrics
@@ -2568,9 +2623,115 @@
                 }
             });
 
+            // ENHANCED: Listen for balance updates with token-specific data
+            socket.on('paper:balance:update', (data) => {
+                console.log('💰 [BALANCE UPDATE] Received:', {
+                    SOL: data.balanceSOL,
+                    USDC: data.balanceUSDC,
+                    Tokens: data.balanceTokens,
+                    PrimaryToken: data.primaryToken,
+                    TotalUSD: data.totalValueUSD,
+                    ROI: data.roi
+                });
+
+                // ==================== UPDATE SOL BALANCE ====================
+                const solBalance = data.balanceSOL || 0;
+                const solElement = document.getElementById('balance-sol');
+                if (solElement) {
+                    solElement.textContent = solBalance.toFixed(4);
+                    console.log(`✅ [SOL] Updated to: ${solBalance.toFixed(4)}`);
+                }
+
+                // ==================== UPDATE TOKEN BALANCE (DYNAMIC!) ====================
+                const tokenElement = document.getElementById('balance-token');
+                const tokenLabelElement = document.getElementById('token-label');
+
+                // Priority 1: Use primaryToken if available (most reliable)
+                if (data.primaryToken && data.primaryToken.symbol && data.primaryToken.symbol !== 'USDC') {
+                    const tokenBalance = data.primaryToken.balance || 0;
+                    const tokenSymbol = data.primaryToken.symbol;
+
+                    if (tokenElement) {
+                        tokenElement.textContent = tokenBalance.toLocaleString(undefined, {
+                            minimumFractionDigits: 2,
+                            maximumFractionDigits: 2
+                        });
+                    }
+
+                    if (tokenLabelElement) {
+                        tokenLabelElement.textContent = tokenSymbol;
+                    }
+
+                    console.log(`✅ [TOKEN] Updated to: ${tokenBalance} ${tokenSymbol}`);
+                }
+                // Priority 2: Check if balanceTokens exists (fallback)
+                else if (data.balanceTokens && data.balanceTokens > 0 && data.primaryToken?.symbol) {
+                    const tokenBalance = data.balanceTokens;
+                    const tokenSymbol = data.primaryToken.symbol;
+
+                    if (tokenElement) {
+                        tokenElement.textContent = tokenBalance.toLocaleString(undefined, {
+                            minimumFractionDigits: 2,
+                            maximumFractionDigits: 2
+                        });
+                    }
+
+                    if (tokenLabelElement) {
+                        tokenLabelElement.textContent = tokenSymbol;
+                    }
+
+                    console.log(`✅ [TOKEN] Updated to: ${tokenBalance} ${tokenSymbol} (from balanceTokens)`);
+                }
+                // Priority 3: Default to USDC if no tokens
+                else {
+                    const usdcBalance = data.balanceUSDC || 0;
+
+                    if (tokenElement) {
+                        tokenElement.textContent = usdcBalance.toFixed(2);
+                    }
+
+                    if (tokenLabelElement) {
+                        tokenLabelElement.textContent = 'USDC';
+                    }
+                    
+                    console.log(`✅ [USDC] Updated to: ${usdcBalance.toFixed(2)}`);
+                }
+
+                // ==================== UPDATE METRICS ====================
+                // Total Value
+                const totalValueElement = document.getElementById('total-value-usd');
+                if (totalValueElement && data.totalValueUSD !== undefined) {
+                    totalValueElement.textContent = '$' + data.totalValueUSD.toFixed(2);
+                }
+
+                // ROI
+                const roiElement = document.getElementById('roi');
+                if (roiElement && data.roi !== undefined) {
+                    const roi = data.roi || 0;
+                    roiElement.textContent = (roi >= 0 ? '+' : '') + roi.toFixed(2) + '%';
+                    roiElement.className = roi >= 0 ? 'positive' : 'negative';
+                }
+
+                // Total P&L
+                const pnlElement = document.getElementById('total-pnl');
+                if (pnlElement && data.totalPnLUSD !== undefined) {
+                    const pnl = data.totalPnLUSD || 0;
+                    pnlElement.textContent = '$' + (pnl >= 0 ? '+' : '') + pnl.toFixed(2);
+                    pnlElement.className = pnl >= 0 ? 'profit' : 'loss';
+                }
+
+                // ==================== DEBUG LOG ====================
+                console.log('📊 Updated:', {
+                    SOL: solBalance.toFixed(4),
+                    Token: data.primaryToken?.symbol || 'USDC',
+                    TokenBalance: data.primaryToken?.balance || data.balanceUSDC,
+                    TotalUSD: data.totalValueUSD?.toFixed(2)
+                });
+            });
+
             socket.on('paper:simulation:update', (data) => {
                 console.log('🔍 [DEBUG] paper:simulation:update received:', data);
-                
+
                 if (data.sessionId === currentPaperSessionId && data.portfolioSnapshot) {
                     const snapshot = data.portfolioSnapshot;
                     const strategyInfo = data.strategyInfo || {};
@@ -2579,7 +2740,7 @@
                     // ADD SIMULATION ACTIVITY TO LIVE FEED
                     if (data.tradeDetails) {
                         const trade = data.tradeDetails;
-                        
+
                         console.log('🔍 [DEBUG] Simulation tradeDetails:', {
                             type: trade.type,
                             amountSOL: trade.amountSOL,
@@ -2588,7 +2749,7 @@
                             tokenSymbol: data.tokenSymbol,
                             currentPriceUSD: data.currentPriceUSD
                         });
-                        
+
                         // Add simulation event to trade feed with enhanced info
                         addSimulationToLiveFeed({
                             type: trade.type || 'simulation',
@@ -2601,7 +2762,7 @@
                             tokenSymbol: data.tokenSymbol || 'TOKEN',
                             timestamp: trade.timestamp || Date.now(),
                             isSimulation: true,
-                            
+
                             // Enhanced simulation details
                             marketImpact: trade.marketImpact || 0,
                             slippage: trade.slippage || 0,
@@ -2612,7 +2773,7 @@
                     // IMPORTANT: Only update metrics from simulation if it's NOT immediately after a trade
                     // paper:trade:executed should be the primary source of truth for metrics after trades
                     // This prevents the simulation update from overwriting trade metrics with slightly different values
-                    
+
                     // Only update if this is a periodic update (not buy_simulation or sell_simulation after a trade)
                     if (data.type !== 'buy_simulation' && data.type !== 'sell_simulation') {
                         const enhancedMetrics = {
@@ -2620,31 +2781,58 @@
                             pnl: snapshot.totalPnLUSD || snapshot.totalPnL || 0,
                             roi: snapshot.roi || 0,
                             winRate: 0, // Win rate not available in simulation updates
-                            
+
                             // Enhanced financial details
                             unrealizedPnL: snapshot.unrealizedPnLUSD || 0,
                             realizedPnL: snapshot.realizedPnLUSD || 0,
                             totalValue: snapshot.totalValueUSD || 0,
-                            
+
                             // Capital utilization
                             capitalUtilization: snapshot.capitalUtilization?.utilizationPercentage || 0,
                             availableCash: snapshot.capitalUtilization?.availableCash || 0,
-                            
+
                             // Allocation
                             solAllocation: snapshot.allocation?.solPercentage || 0,
                             usdcAllocation: snapshot.allocation?.usdcPercentage || 0,
                             tokenAllocation: snapshot.allocation?.tokenPercentage || 0,
                         };
-                        
+
                         updateLiveMetrics(enhancedMetrics);
                     }
                 }
             });
 
 
+            // Initialize virtual balance display
+            function initializeVirtualBalance() {
+                // Set initial balances
+                const solElement = document.getElementById('balance-sol');
+                const tokenElement = document.getElementById('balance-token');
+                const tokenLabelElement = document.getElementById('token-label');
+                const totalValueElement = document.getElementById('total-value-usd');
+                const roiElement = document.getElementById('roi');
+                const pnlElement = document.getElementById('total-pnl');
+                
+                if (solElement) solElement.textContent = '10.0000';
+                if (tokenElement) tokenElement.textContent = '0.00';
+                if (tokenLabelElement) tokenLabelElement.textContent = 'USDC';
+                if (totalValueElement) totalValueElement.textContent = '$0.00';
+                if (roiElement) {
+                    roiElement.textContent = '0.00%';
+                    roiElement.className = 'neutral';
+                }
+                if (pnlElement) {
+                    pnlElement.textContent = '$0.00';
+                    pnlElement.className = 'neutral';
+                }
+                
+                console.log('💰 Virtual balance initialized: 10 SOL, 0 USDC');
+            }
+
             // Initialize paper trading when page loads
             document.addEventListener('DOMContentLoaded', () => {
                 initializePaperTrading();
+                initializeVirtualBalance();
 
                 // Add event listener to toggle
                 const toggle = document.getElementById('paperTradingMode');
@@ -2699,7 +2887,7 @@
                     try {
                         mcpToolsState = JSON.parse(savedState);
                         console.log('🔧 Loaded MCP tools state:', mcpToolsState);
-                        
+
                         // Apply loaded state to checkboxes
                         Object.keys(mcpToolsState).forEach(toolName => {
                             const checkbox = document.getElementById(`tool-${toolName}`);
@@ -2707,7 +2895,7 @@
                                 checkbox.checked = mcpToolsState[toolName];
                             }
                         });
-                        
+
                         updateToolsCount();
                     } catch (error) {
                         console.error('❌ Error loading MCP tools state:', error);
@@ -2736,7 +2924,7 @@
                 if (toolItem) {
                     toolItem.classList.remove('tool-enabled', 'tool-disabled');
                     toolItem.classList.add(isEnabled ? 'tool-enabled' : 'tool-disabled');
-                    
+
                     // Remove animation class after animation completes
                     setTimeout(() => {
                         toolItem.classList.remove('tool-enabled', 'tool-disabled');
@@ -2790,7 +2978,7 @@
                 const countElement = document.getElementById('enabledToolsCount');
                 if (countElement) {
                     countElement.textContent = enabledCount;
-                    
+
                     // Change color based on count
                     if (enabledCount === 0) {
                         countElement.style.color = 'var(--error-color)';
@@ -2864,7 +3052,7 @@
             // Show "Activate Strategy" button when strategy is ready
             function showActivateStrategyButton(strategy) {
                 console.log('🎯 Showing Activate Strategy button for:', strategy);
-                
+
                 // Remove any existing activate button
                 const existingButton = document.querySelector('.activate-strategy-button-container');
                 if (existingButton) {
@@ -2952,7 +3140,7 @@
                 // Click handlers
                 activateButton.addEventListener('click', async () => {
                     console.log('✅ Activate button clicked - requesting confirmation');
-                    
+
                     // Show confirmation dialog
                     const confirmActivation = confirm(
                         '⚠️ FINAL CONFIRMATION\n\n' +
@@ -2961,13 +3149,13 @@
                         '⚠️ Trades will be executed automatically based on your strategy.\n\n' +
                         'Are you absolutely sure you want to proceed?'
                     );
-                    
+
                     if (!confirmActivation) {
                         console.log('❌ User cancelled activation');
                         addMessage('system', '❌ Strategy activation cancelled');
                         return;
                     }
-                    
+
                     // User confirmed - proceed with activation
                     activateButton.disabled = true;
                     activateButton.innerHTML = '<span>Activating...</span>';
@@ -3201,7 +3389,7 @@
                         execText += ` (${executionsPerMin.toFixed(2)}/min)`;
                     }
                     execCountEl.textContent = execText;
-                    
+
                     // Add tooltip with timing details
                     execCountEl.title = `${executions} trades executed`;
                     if (executionsPerMin > 0) {
@@ -3214,7 +3402,7 @@
                 if (pnlElement) {
                     pnlElement.textContent = `${pnlValue >= 0 ? '+' : ''}$${pnlValue.toFixed(2)}`;
                     pnlElement.className = `metric-value ${pnlValue >= 0 ? 'profit' : 'loss'}`;
-                    
+
                     // Add detailed tooltip
                     let tooltip = `Total P&L: $${pnlValue.toFixed(2)}`;
                     if (realizedPnL !== 0) {
@@ -3234,7 +3422,7 @@
                 if (roiEl) {
                     roiEl.textContent = `${roiValue >= 0 ? '+' : ''}${roiValue.toFixed(2)}%`;
                     roiEl.className = `metric-value ${roiValue >= 0 ? 'profit' : 'loss'}`;
-                    
+
                     // Add projection tooltip
                     let tooltip = `Current ROI: ${roiValue.toFixed(2)}%`;
                     if (metrics?.projectedMonthlyROI) {
@@ -3253,7 +3441,7 @@
                 const winRateEl = document.getElementById('winRate');
                 if (winRateEl) {
                     winRateEl.textContent = `${winRateValue.toFixed(1)}%`;
-                    
+
                     // Add detailed tooltip
                     let tooltip = `Win Rate: ${winRateValue.toFixed(1)}%`;
                     if (metrics?.winningTrades || metrics?.losingTrades) {
@@ -3301,13 +3489,13 @@
                     winningTrades: data?.winningTrades,
                     losingTrades: data?.losingTrades
                 });
-                
+
                 const panel = document.getElementById('advancedMetricsPanel');
-                
+
                 // ✅ FIX: Show panel immediately when strategy is active, not just when hasExecutions > 0
                 const activeView = document.getElementById('activeStrategyView');
                 const isStrategyActive = activeView && activeView.style.display !== 'none';
-                
+
                 // Show panel if strategy is active (even with 0 executions) OR if we have any data
                 if (panel && data && isStrategyActive) {
                     panel.style.display = 'block';
@@ -3394,7 +3582,7 @@
                     const wins = data.winningTrades || 0;
                     const losses = data.losingTrades || 0;
                     wlrEl.textContent = `${wins}:${losses}`;
-                    
+
                     if (wins > losses) {
                         wlrEl.className = 'advanced-metric-value positive';
                     } else if (losses > wins) {
