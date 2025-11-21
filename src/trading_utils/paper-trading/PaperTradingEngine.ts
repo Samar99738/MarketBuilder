@@ -21,7 +21,7 @@ import { marketDataProvider } from './MarketDataProvider';
 import { awsLogger } from '../../aws/logger';
 import { ENV_CONFIG } from '../../config/environment';
 import { timeStamp } from 'console';
-import { symbol } from 'zod';
+import { date, symbol } from 'zod';
 import { token } from '@coral-xyz/anchor/dist/cjs/utils';
 
 const SOL_ADDRESS = 'So11111111111111111111111111111111111111112';
@@ -390,7 +390,24 @@ export class PaperTradingEngine {
       }
       
       if (!marketData) {
-        this.log(sessionId, 'error', 'Failed to fetch market data after retries', { tokenAddress, lastError });
+        this.log(sessionId, 'error', 'Failed to fetch market data after retries', {tokenAddress, lastError});
+
+        // Emmit error state without changing balnaces or charging fees
+        if (this.io) {
+          this.io.emit('trade_execution_failed', {
+            sessionId,
+            timestamp: Date.now(),
+            error: `Market data fetch failed: ${lastError}`,
+            tokenAddress,
+            attemptedAmount: amountSOL,
+            reason: 'price_fetch_failure',
+            currentBalance: {
+              balanceSOL: state.portfolio.balanceSOL,
+              balanceUSDC: state.portfolio.balanceUSDC,
+              totalValueUSD: state.portfolio.totalValueUSD,
+            }
+          });
+        }
         return {
           success: false,
           error: `Failed to fetch market data: ${lastError}. Please try again.`,

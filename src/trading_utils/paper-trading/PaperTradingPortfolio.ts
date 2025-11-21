@@ -22,7 +22,7 @@ export class PaperTradingPortfolio {
     // Don't hardcode SOL price - will be updated with first trade
     // Use a reasonable estimate for now, but it will be corrected on first price fetch
     const estimatedSolPrice = 200;
-    
+
     this.portfolio = {
       balanceSOL: initialBalanceSOL,
       balanceUSDC: initialBalanceUSDC,
@@ -60,7 +60,7 @@ export class PaperTradingPortfolio {
       this.portfolio.initialBalanceUSD = this.portfolio.initialBalanceSOL * trade.solPriceUSD + this.portfolio.balanceUSDC;
       this.portfolio.totalValueUSD = this.portfolio.initialBalanceUSD;
     }
-    
+
     this.trades.push(trade);
 
     // Update balances
@@ -89,7 +89,7 @@ export class PaperTradingPortfolio {
       // Update existing position - calculate new average entry price
       const totalTokens = existing.amount + trade.amountTokens;
       const totalInvested = existing.totalInvestedSOL + trade.amountSOL;
-      
+
       existing.amount = totalTokens;
       existing.averageEntryPrice = totalInvested / totalTokens;
       existing.totalInvestedSOL = totalInvested;
@@ -179,7 +179,7 @@ export class PaperTradingPortfolio {
     for (const [tokenAddress, position] of this.portfolio.positions) {
       // Update position with current market price
       const marketData = await marketDataProvider.fetchTokenPrice(tokenAddress);
-      
+
       if (marketData) {
         position.currentPrice = marketData.price;
         position.currentValueSOL = position.amount * marketData.price;
@@ -250,10 +250,10 @@ export class PaperTradingPortfolio {
     // Win/Loss analysis
     const profitableTrades = sellTrades.filter(t => (t.realizedPnL || 0) > 0);
     const losingTrades = sellTrades.filter(t => (t.realizedPnL || 0) <= 0 && t.realizedPnL !== undefined);
-    
+
     const winningTrades = profitableTrades.length;
     const losingTradesCount = losingTrades.length;
-    
+
     // Calculate winRate based on completed trades (buys + sells)
     // If we have NO sell trades yet, show 0% winRate (not undefined/NaN)
     // If we have sell trades, calculate based on profitable vs losing sells
@@ -281,8 +281,8 @@ export class PaperTradingPortfolio {
       }))
     });
 
-    const averageWin = winningTrades > 0 ? profitableTrades.reduce((sum, t) => sum + (t.realizedPnL || 0), 0) / winningTrades: 0;
-    
+    const averageWin = winningTrades > 0 ? profitableTrades.reduce((sum, t) => sum + (t.realizedPnL || 0), 0) / winningTrades : 0;
+
     const averageLoss = losingTradesCount > 0 ? Math.abs(losingTrades.reduce((sum, t) => sum + (t.realizedPnL || 0), 0) / losingTradesCount) : 0;
 
     // Improved Profit Factor calculation
@@ -291,7 +291,7 @@ export class PaperTradingPortfolio {
     // If no winning trades, profit factor is 0
     const totalWinAmount = profitableTrades.reduce((sum, t) => sum + (t.realizedPnL || 0), 0);
     const totalLossAmount = Math.abs(losingTrades.reduce((sum, t) => sum + (t.realizedPnL || 0), 0));
-    
+
     let profitFactor = 0;
     if (winningTrades > 0 && losingTradesCount === 0) {
       profitFactor = 999; // All winning trades, cap at 999
@@ -317,7 +317,7 @@ export class PaperTradingPortfolio {
 
     // ROI
     const roi = ((this.portfolio.totalValueUSD - this.portfolio.initialBalanceUSD) / this.portfolio.initialBalanceUSD) * 100;
-    
+
     // Time-based metrics
     const duration = Date.now() - this.startTime;
     const daysElapsed = duration / (1000 * 60 * 60 * 24);
@@ -329,7 +329,7 @@ export class PaperTradingPortfolio {
     // Max drawdown calculation (simplified)
     let maxDrawdown = 0;
     let peak = this.portfolio.initialBalanceSOL;
-    
+
     for (const trade of this.trades) {
       const currentValue = trade.balanceSOL;
       if (currentValue > peak) {
@@ -412,7 +412,7 @@ export class PaperTradingPortfolio {
    */
   reset(initialBalanceSOL: number, initialBalanceUSDC: number = 0): void {
     const solPrice = 200; // Will be updated dynamically
-    
+
     this.portfolio = {
       balanceSOL: initialBalanceSOL,
       balanceUSDC: initialBalanceUSDC,
