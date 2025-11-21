@@ -5,9 +5,9 @@ import {
 } from "./StrategyBuilder";
 import { awsLogger } from "../aws/logger";
 import { AWS_CONFIG } from "../aws/config";
-import { 
-  strategyExecutionTracker, 
-  TradeExecution 
+import {
+  strategyExecutionTracker,
+  TradeExecution
 } from "./StrategyExecutionTracker";
 import { getTokenPriceUSD, getSolPriceUSD } from "./TokenUtils";
 import { Connection, LAMPORTS_PER_SOL } from "@solana/web3.js";
@@ -15,7 +15,7 @@ import { paperTradingEngine } from "./paper-trading/PaperTradingEngine";
 import { PaperTradingMode } from "./paper-trading/types";
 import { PaperTradingProvider } from "./paper-trading/PaperTradingProvider";
 import { Server as SocketServer } from "socket.io";
-import { DebugLogger } from "../utils/logger"; 
+import { DebugLogger } from "../utils/logger";
 import { RealTradeFeedService } from "../server/websocket/RealTradeFeedService";
 import { TokenValidationService } from "./TokenValidationService";
 import { exec } from "child_process";
@@ -61,12 +61,12 @@ export class StrategyExecutionManager {
   private isShuttingDown = false;
   private io: any = null;
   private tokenValidator?: TokenValidationService;
-  
+
   // User-level tracking for multi-user isolation
   private userStrategies: Map<string, Set<string>> = new Map(); // userId -> Set<runningId>
   private userExecutionCount: Map<string, number> = new Map(); // userId -> daily count
   private lastResetDate: Date = new Date();
-  
+
   // Event queue for immediate execution
   private executionQueue: Map<string, Array<{
     runningId: string;
@@ -93,7 +93,7 @@ export class StrategyExecutionManager {
     error: string;
     timestamp: number;
   }> = [];
-  private readonly MAX_DLQ_SIZE = 1000; 
+  private readonly MAX_DLQ_SIZE = 1000;
 
   // Method to set real trade feed service
   setRealTradeFeed(service: RealTradeFeedService): void {
@@ -109,9 +109,9 @@ export class StrategyExecutionManager {
     console.log('[StrategyExecutionManager] Token validator service connected');
   }
 
-/**
-   * Set WebSocket server for real-time updates
-   */
+  /**
+     * Set WebSocket server for real-time updates
+     */
   setWebSocketServer(io: any): void {
     this.io = io;
     console.log('✅ StrategyExecutionManager: WebSocket IO configured');
@@ -141,15 +141,15 @@ export class StrategyExecutionManager {
     const tokenAddress = (strategy as any).tokenAddress || strategy.variables?.tokenAddress;
     if (tokenAddress && this.tokenValidator) {
       const tokenInfo = await this.tokenValidator.validateToken(tokenAddress);
-      
+
       if (!tokenInfo.isValid) {
         throw new Error(`Invalid token address: ${tokenAddress}`);
       }
-      
+
       if (!tokenInfo.isPumpFun && strategy.name.includes('PumpFun')) {
         console.warn(`[StrategyExecutionManager] Token ${tokenAddress} may not be a pump.fun token`);
       }
-      
+
       console.log(`[StrategyExecutionManager] Token validated:`, {
         address: tokenAddress,
         symbol: tokenInfo.symbol || 'Unknown',
@@ -163,13 +163,13 @@ export class StrategyExecutionManager {
     if (strategy.name.includes('Reactive') || strategy.name.includes('Mirror')) {
       const oldReactiveStrategies = Array.from(this.runningStrategies.entries())
         .filter(([id, exec]) => {
-          const isReactive = exec.strategyId.includes('reactive') || 
-                           (strategyBuilder.getStrategy(exec.strategyId)?.name || '').includes('Reactive') ||
-                           (strategyBuilder.getStrategy(exec.strategyId)?.name || '').includes('Mirror');
+          const isReactive = exec.strategyId.includes('reactive') ||
+            (strategyBuilder.getStrategy(exec.strategyId)?.name || '').includes('Reactive') ||
+            (strategyBuilder.getStrategy(exec.strategyId)?.name || '').includes('Mirror');
           return isReactive && exec.status === 'running';
         })
         .map(([id]) => id);
-      
+
       if (oldReactiveStrategies.length > 0) {
         console.log(`\n🧹 [CLEANUP] Stopping ${oldReactiveStrategies.length} old reactive strategies before starting new one...`);
         for (const oldId of oldReactiveStrategies) {
@@ -187,13 +187,13 @@ export class StrategyExecutionManager {
         maxDailyExecutions: resourceLimits.maxDailyExecutions || 100,
         maxPositionSize: resourceLimits.maxPositionSize || 10,
       };
-      
+
       // Check concurrent strategy limit
       const userStrategySet = this.userStrategies.get(userId) || new Set();
       if (userStrategySet.size >= userLimits.maxConcurrentStrategies) {
         throw new Error(`User limit reached: ${userLimits.maxConcurrentStrategies} concurrent strategies max`);
       }
-      
+
       // Check daily execution limit
       this.checkAndResetDailyLimits();
       const dailyCount = this.userExecutionCount.get(userId) || 0;
@@ -225,16 +225,16 @@ export class StrategyExecutionManager {
     let paperTradingSessionId: string | undefined;
     if (paperTradingMode === 'paper') {
       // Check if this is a SELL strategy - if so, we need to start with tokens
-      const isSellStrategy = strategy.name.toLowerCase().includes('sell') || 
-                             strategy.description.toLowerCase().includes('sell');
-      
+      const isSellStrategy = strategy.name.toLowerCase().includes('sell') ||
+        strategy.description.toLowerCase().includes('sell');
+
       // Extract tokenAddress from strategy - check first step's context initialization
       let tokenAddress: string | undefined;
-      const initStep = strategy.steps.find(step => 
-        step.type === 'condition' && 
+      const initStep = strategy.steps.find(step =>
+        step.type === 'condition' &&
         step.id.includes('initialize')
       ) as any;
-      
+
       // Try to extract tokenAddress from strategy context by executing init step temporarily
       if (initStep && initStep.customCondition) {
         const tempContext: any = { variables: {} };
@@ -245,24 +245,24 @@ export class StrategyExecutionManager {
           console.log('[StrategyExecutionManager] Could not extract tokenAddress from init step');
         }
       }
-      
+
       // FALLBACK 1: If tokenAddress is still SOL default and strategy config has a tokenAddress, use it
       if ((!tokenAddress || tokenAddress === 'So11111111111111111111111111111111111111112') && (strategy as any).tokenAddress) {
         console.log(`[StrategyExecutionManager] Using tokenAddress from strategy config: ${(strategy as any).tokenAddress}`);
         tokenAddress = (strategy as any).tokenAddress;
       }
-      
+
       // FALLBACK 2: Check strategy.variables.tokenAddress as additional fallback
       if ((!tokenAddress || tokenAddress === 'So11111111111111111111111111111111111111112') && strategy.variables?.tokenAddress) {
         console.log(`[StrategyExecutionManager] Using tokenAddress from strategy.variables: ${strategy.variables.tokenAddress}`);
         tokenAddress = strategy.variables.tokenAddress;
       }
-      
+
       console.log(`[StrategyExecutionManager] Token address for session: ${tokenAddress || 'MISSING - will fail!'}`);
       console.log(`[StrategyExecutionManager] Strategy tokenAddress: ${(strategy as any).tokenAddress}`);
       console.log(`[StrategyExecutionManager] Strategy variables.tokenAddress: ${strategy.variables?.tokenAddress}`);
       console.log(`[StrategyExecutionManager] Is SOL address: ${tokenAddress === 'So11111111111111111111111111111111111111112'}`);
-      
+
       const initialConfig = {
         initialBalanceSOL: initialBalanceSOL || 10,
         initialBalanceUSDC: 0,
@@ -282,41 +282,41 @@ export class StrategyExecutionManager {
         } else {
           // Session ID provided but doesn't exist - create it with FIX #7: timeout
           console.log(`⚠️ [StrategyExecutionManager] Provided session ${existingPaperSessionId} doesn't exist, creating it...`);
-          
+
           const sessionPromise = paperTradingEngine.createSession(
             existingPaperSessionId, // Use the provided ID
             undefined,
             strategyId,
             initialConfig
           );
-          
+
           // Add 15 second timeout to handle rate-limited APIs (increased from 8s)
           // Market data APIs (CoinGecko, pump.fun) often have rate limits
           // Strategy should still start even if initial price fetch fails - it will retry
-          const timeoutPromise = new Promise((_, reject) => 
+          const timeoutPromise = new Promise((_, reject) =>
             setTimeout(() => reject(new Error('Session creation timeout after 15s. Market data sources may be temporarily unavailable.')), 15000)
           );
-          
+
           try {
             const paperSession = await Promise.race([sessionPromise, timeoutPromise]) as any;
             paperTradingSessionId = paperSession.sessionId;
-            
+
             awsLogger.info(`📝 Paper trading session created with provided ID (${isSellStrategy ? 'SELL strategy - initialized with tokens' : 'BUY strategy'})`, {
               metadata: { strategyId, runningId, sessionId: paperTradingSessionId, initialTokens: initialConfig.initialBalanceTokens }
             });
           } catch (error) {
             // Allow strategy to start even if price fetch fails
             const errorMsg = error instanceof Error ? error.message : String(error);
-            
+
             if (errorMsg.includes('timeout')) {
               // Don't fail - create session without initial price (will retry later)
               awsLogger.warn(`⚠️ Session creation timed out, creating session without initial price`, {
                 metadata: { strategyId, runningId }
               });
-              
+
               // Create minimal session without waiting for market data
               paperTradingSessionId = existingPaperSessionId;
-              
+
               // Log warning but continue
               console.warn(`⚠️ [STRATEGY START] Market data temporarily unavailable, starting with cached/fallback prices`);
               console.warn(`⚠️ [STRATEGY START] Prices will be refreshed on first trade execution`);
@@ -341,34 +341,34 @@ export class StrategyExecutionManager {
           strategyId,
           initialConfig
         );
-        
+
         // Add 15 second timeout to handle rate-limited APIs (increased from 8s)
         // Market data APIs (CoinGecko, pump.fun) often have rate limits
         // Strategy should still start even if initial price fetch fails - it will retry
-        const timeoutPromise = new Promise((_, reject) => 
+        const timeoutPromise = new Promise((_, reject) =>
           setTimeout(() => reject(new Error('Session creation timeout after 15s. Market data sources may be temporarily unavailable.')), 15000)
         );
-        
+
         try {
           const paperSession = await Promise.race([sessionPromise, timeoutPromise]) as any;
           paperTradingSessionId = paperSession.sessionId;
-          
+
           awsLogger.info(`🆕 Paper trading session created (${isSellStrategy ? 'SELL strategy - initialized with tokens' : 'BUY strategy'})`, {
             metadata: { strategyId, runningId, sessionId: paperTradingSessionId, initialTokens: initialConfig.initialBalanceTokens }
           });
         } catch (error) {
           // RELAXED ERROR HANDLING: Allow strategy to start even if price fetch fails
           const errorMsg = error instanceof Error ? error.message : String(error);
-          
+
           if (errorMsg.includes('timeout')) {
             // Don't fail - create session without initial price (will retry later)
             awsLogger.warn(`⚠️ Session creation timed out, creating session without initial price`, {
               metadata: { strategyId, runningId }
             });
-            
+
             // Create minimal session without waiting for market data
             paperTradingSessionId = runningId;
-            
+
             // Log warning but continue
             console.warn(`⚠️ [STRATEGY START] Market data temporarily unavailable, starting with cached/fallback prices`);
             console.warn(`⚠️ [STRATEGY START] Prices will be refreshed on first trade execution`);
@@ -394,13 +394,13 @@ export class StrategyExecutionManager {
         tokenAddress // Pass the token address to the provider
       );
       strategyBuilder.setTradingProvider(paperProvider);
-      
-  // StrategyBuilder configured for PAPER trading
+
+      // StrategyBuilder configured for PAPER trading
     } else {
       // Ensure we're using live trading provider
       const { TradingProviderFactory } = require('./TradingProvider');
       strategyBuilder.setTradingProvider(TradingProviderFactory.getInstance());
-      
+
     }
 
     // Initialize tracking if enabled
@@ -408,14 +408,14 @@ export class StrategyExecutionManager {
       try {
         // Use provided balance or default to 0 (will be updated on first execution)
         const initialBalance = initialBalanceSOL || 0;
-        
+
         // Initialize tracker
         await strategyExecutionTracker.initializeStrategy(
           runningId,
           strategy.name,
           initialBalance
         );
-        
+
         awsLogger.info('Analytics tracking initialized', {
           metadata: { strategyId, runningId, initialBalanceSOL: initialBalance, mode: paperTradingMode }
         });
@@ -451,33 +451,33 @@ export class StrategyExecutionManager {
     };
 
     this.runningStrategies.set(runningId, runningStrategy);
-    
+
     // Track user's strategies if userId provided
     if (userId) {
       if (!this.userStrategies.has(userId)) {
         this.userStrategies.set(userId, new Set());
       }
       this.userStrategies.get(userId)!.add(runningId);
-      
+
       // Increment daily count
       const dailyCount = this.userExecutionCount.get(userId) || 0;
       this.userExecutionCount.set(userId, dailyCount + 1);
     }
-    
+
     this.executeStrategyContinuously(runningId);
 
     awsLogger.strategyStarted(strategyId, runningId);
     awsLogger.info(`Strategy started in ${paperTradingMode} mode`, {
       metadata: { strategyId, runningId, paperTradingMode }
     });
-    
+
     return runningId;
   }
 
   // Stop a running strategy
   async stopStrategy(runningId: string): Promise<boolean> {
     DebugLogger.debug(`🔍 [DEBUG stopStrategy] Called for runningId: ${runningId}`);
-    
+
     const runningStrategy = this.runningStrategies.get(runningId);
     if (!runningStrategy) {
       DebugLogger.debug(`❌ [DEBUG stopStrategy] Strategy ${runningId} NOT FOUND in runningStrategies map`);
@@ -567,7 +567,7 @@ export class StrategyExecutionManager {
     DebugLogger.debug(`🔍 [DEBUG stopStrategy] Step 7: Handling paper trading session`);
     if (runningStrategy.paperTradingMode === 'paper' && runningStrategy.paperTradingSessionId) {
       const isUiSession = runningStrategy.paperTradingSessionId.startsWith('paper-ui-');
-      
+
       if (!isUiSession) {
         await paperTradingEngine.endSession(runningStrategy.paperTradingSessionId);
         awsLogger.info('Paper trading session ended', {
@@ -589,9 +589,9 @@ export class StrategyExecutionManager {
     }
 
     awsLogger.strategyStopped(runningStrategy.strategyId, runningId);
-    
+
     console.log(`✅ [StrategyExecutionManager] Strategy ${runningId} STOPPED successfully`);
-    
+
     return true;
   }
 
@@ -625,7 +625,7 @@ export class StrategyExecutionManager {
   // Execute strategy continuously
   private async executeStrategyContinuously(runningId: string): Promise<void> {
     const runningStrategy = this.runningStrategies.get(runningId);
-    
+
     // FIX #2: RACE CONDITION PROTECTION - Check stop flag FIRST before any execution
     if (runningStrategy?.currentContext?.variables._shouldStop === true) {
       console.log(`🛑 [StrategyExecutionManager] Stop flag detected for ${runningId} - ABORTING execution`);
@@ -633,7 +633,7 @@ export class StrategyExecutionManager {
       runningStrategy.isExecuting = false;
       return;
     }
-    
+
     // FIX #2: Enhanced status checks with atomic flag setting
     if (
       !runningStrategy ||
@@ -654,10 +654,10 @@ export class StrategyExecutionManager {
     // CHECK if strategy is in event only mode
     const strategy = strategyBuilder.getStrategy(runningStrategy.strategyId);
     const isEventDriven = strategy?.name?.includes('Reactive') ||
-                          strategy?.name?.includes('Mirror')||
-                          runningStrategy.currentContext?.variables.eventDrivenMode === true;
+      strategy?.name?.includes('Mirror') ||
+      runningStrategy.currentContext?.variables.eventDrivenMode === true;
 
-    
+
     // For event-driven strategies, waiting for trigger, skip perodic execution
     // They will be triggered immediately by handleRealTimeEvent -> processExecutionQueue
     if (isEventDriven && runningStrategy.currentContext?.currentStepId?.includes('wait_for_trigger')) {
@@ -701,21 +701,21 @@ export class StrategyExecutionManager {
         runningStrategy.currentContext, // Preserve executionCount and other variables
         runningStrategy.abortController?.signal // CRITICAL: Pass abort signal for immediate cancellation
       );
-      
+
       DebugLogger.debug(`🔍 [DEBUG executeStrategyContinuously] Execution result: success=${result.success}, completed=${result.completed}, subscriptionRequested=${result.subscriptionRequested}`);
 
       // Subscribe to real trade feed for ALL strategies that need it
       // This check happens BEFORE any stop/abort logic, ensuring subscription during normal operation
       const tokenAddress = result.context.variables.tokenAddress;
       const strategy = strategyBuilder.getStrategy(runningStrategy.strategyId);
-      
+
       // Subscribe if:
       // 1. Strategy explicitly requested subscription (reactive strategies with _needsSubscription flag)
       // 2. OR strategy is already waiting for real trades (AI-First strategies in wait_for_trigger/detect_activity steps)
-      const needsSubscription = result.subscriptionRequested === true || 
-                               result.context.currentStepId?.includes('wait_for_trigger') ||
-                               result.context.currentStepId?.includes('detect_activity');
-      
+      const needsSubscription = result.subscriptionRequested === true ||
+        result.context.currentStepId?.includes('wait_for_trigger') ||
+        result.context.currentStepId?.includes('detect_activity');
+
       if (needsSubscription && !this.eventSubscriptions.has(runningId) && strategy && tokenAddress) {
         console.log(`🔥 [SUBSCRIPTION] Strategy needs real-time trade data (step: ${result.context.currentStepId})`);
         console.log(`🔥 [SUBSCRIPTION] Subscribing during iteration ${runningStrategy.executionCount + 1}`);
@@ -726,19 +726,19 @@ export class StrategyExecutionManager {
       runningStrategy.lastExecutionTime = Date.now();
       runningStrategy.executionCount++;
       runningStrategy.lastResult = result;
-      
+
       // FIX #4: Preserve _shouldStop flag BEFORE updating context
       const shouldStopBeforeUpdate = runningStrategy.currentContext?.variables._shouldStop === true;
       DebugLogger.debug(`🔍 [DEBUG executeStrategyContinuously] Stop flag before context update: ${shouldStopBeforeUpdate}`);
-      
+
       runningStrategy.currentContext = result.context; // Save context for next execution
-      
+
       // CRITICAL: If stop flag was set BEFORE execution finished, restore it
       if (shouldStopBeforeUpdate) {
         runningStrategy.currentContext.variables._shouldStop = true;
         DebugLogger.debug(`🛑 [StrategyExecutionManager] Preserved stop flag in context after execution`);
       }
-      
+
       DebugLogger.debug(`🔍 [DEBUG executeStrategyContinuously] Context updated, executionCount=${runningStrategy.executionCount}`);
 
       // FIX #5: Check if stop was requested during execution
@@ -746,13 +746,13 @@ export class StrategyExecutionManager {
         console.log(`🛑 [StrategyExecutionManager] Stop condition detected after execution - STOPPING strategy`);
         runningStrategy.status = 'stopped';
         runningStrategy.isExecuting = false;
-        
+
         // Clear any pending timeout
         if (runningStrategy.intervalId) {
           clearTimeout(runningStrategy.intervalId);
           runningStrategy.intervalId = undefined;
         }
-        
+
         // Emit stopped event
         if (this.io) {
           this.io.emit('strategy:stopped', {
@@ -763,7 +763,7 @@ export class StrategyExecutionManager {
           });
           DebugLogger.debug(`📡 [StrategyExecutionManager] Emitted strategy:stopped event`);
         }
-        
+
         return; // Exit without scheduling next execution
       }
 
@@ -776,14 +776,14 @@ export class StrategyExecutionManager {
           executionCount: runningStrategy.executionCount,
           metadata: { totalTime: Date.now() - runningStrategy.startTime }
         });
-        
+
         // Stop the strategy
         runningStrategy.status = 'stopped';
         if (runningStrategy.trackingEnabled) {
           strategyExecutionTracker.completeStrategy(runningId);
         }
         runningStrategy.isExecuting = false;
-        
+
         // Emit completed event
         if (this.io) {
           this.io.emit('strategy:completed', {
@@ -793,7 +793,7 @@ export class StrategyExecutionManager {
             executionCount: runningStrategy.executionCount
           });
         }
-        
+
         return; // Exit the continuous execution loop
       }
 
@@ -811,12 +811,12 @@ export class StrategyExecutionManager {
 
       if (!result.success) {
         runningStrategy.error = result.error;
-        
+
         // Record failure in tracker
         if (runningStrategy.trackingEnabled) {
           strategyExecutionTracker.recordFailure(runningId, result.error || 'Unknown error');
         }
-        
+
         awsLogger.warn("Strategy execution failed", {
           strategyId: runningStrategy.strategyId,
           runningId,
@@ -831,13 +831,13 @@ export class StrategyExecutionManager {
 
       // FIX #6: COMPREHENSIVE CHECK before scheduling next execution
       const currentStrategy = this.runningStrategies.get(runningId);
-      const shouldContinue = currentStrategy && 
-                            currentStrategy.status === "running" && 
-                            !this.isShuttingDown &&
-                            !currentStrategy.currentContext?.variables._shouldStop;
-      
+      const shouldContinue = currentStrategy &&
+        currentStrategy.status === "running" &&
+        !this.isShuttingDown &&
+        !currentStrategy.currentContext?.variables._shouldStop;
+
       DebugLogger.debug(`🔍 [DEBUG executeStrategyContinuously] Should continue: ${shouldContinue}, status=${currentStrategy?.status}`);
-      
+
       if (shouldContinue) {
         const isWaitingForEvent = runningStrategy.currentContext?.currentStepId?.includes('wait_for_trigger');
         const adaptiveDelay = isWaitingForEvent ? 5000 : runningStrategy.restartDelay;
@@ -847,15 +847,15 @@ export class StrategyExecutionManager {
         runningStrategy.intervalId = setTimeout(() => {
           // Fix #7: DOUBLE-CHECK  before executing (timeout could fire after stop)
           const strategy = this.runningStrategies.get(runningId);
-          if(strategy && 
-            strategy.status === 'running' && 
+          if (strategy &&
+            strategy.status === 'running' &&
             !strategy.currentContext?.variables._shouldStop &&
             !this.isShuttingDown) {
-              DebugLogger.debug(`[StrategyExecutionManager] Timeout fired - conditions valid - executing ${runningId}`);
-              this.executeStrategyContinuously(runningId);
-            }else{
-              DebugLogger.debug(`[StrategyExecutionManager] Timeout fired but strategy ${runningId} stopped - NOT executing`);
-            }
+            DebugLogger.debug(`[StrategyExecutionManager] Timeout fired - conditions valid - executing ${runningId}`);
+            this.executeStrategyContinuously(runningId);
+          } else {
+            DebugLogger.debug(`[StrategyExecutionManager] Timeout fired but strategy ${runningId} stopped - NOT executing`);
+          }
         }, adaptiveDelay);
       } else {
         DebugLogger.debug(`⏹️ [StrategyExecutionManager] NOT scheduling next execution for ${runningId} - strategy stopped`);
@@ -872,13 +872,13 @@ export class StrategyExecutionManager {
       // Track retry count
       runningStrategy.retryCount = (runningStrategy.retryCount || 0) + 1;
       const maxRetries = runningStrategy.maxRetries || 3;
-      
+
       console.log(`❌ [StrategyExecutionManager] Error in ${runningId} (retry ${runningStrategy.retryCount}/${maxRetries}):`, error);
 
       // Record failure in tracker
       if (runningStrategy.trackingEnabled) {
         strategyExecutionTracker.recordFailure(
-          runningId, 
+          runningId,
           error instanceof Error ? error.message : String(error)
         );
         strategyExecutionTracker.failStrategy(runningId, runningStrategy.error);
@@ -903,9 +903,9 @@ export class StrategyExecutionManager {
         runningStrategy.intervalId = setTimeout(() => {
           // FIX #9: Check all conditions before retry
           const strategy = this.runningStrategies.get(runningId);
-          if (strategy && 
-              !this.isShuttingDown && 
-              !strategy.currentContext?.variables._shouldStop) {
+          if (strategy &&
+            !this.isShuttingDown &&
+            !strategy.currentContext?.variables._shouldStop) {
             strategy.status = "running";
             strategy.error = undefined;
             this.executeStrategyContinuously(runningId);
@@ -917,7 +917,7 @@ export class StrategyExecutionManager {
         // Give up after max retries
         console.error(`❌ [StrategyExecutionManager] Strategy ${runningId} failed after ${maxRetries} retries, STOPPING`);
         runningStrategy.status = "error";
-        
+
         // Notify UI of permanent failure
         if (this.io) {
           this.io.emit('strategy:failed', {
@@ -932,33 +932,32 @@ export class StrategyExecutionManager {
       }
     }
   }
-
   /**
    * Validate token before starting real-time monitoring
    * Prevents wasting resources on invalid/inactive tokens
    */
   private async validateTokenForStrategy(
-    tokenAddress: string, 
+    tokenAddress: string,
     strategyId: string
   ): Promise<{ valid: boolean; reason?: string }> {
     try {
       console.log(`🔍 [Token Validation] Checking token: ${tokenAddress.substring(0, 8)}...`);
-      
+
       // Basic format validation
       if (!/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(tokenAddress)) {
-        return { 
-          valid: false, 
-          reason: 'Invalid Solana address format' 
+        return {
+          valid: false,
+          reason: 'Invalid Solana address format'
         };
       }
-      
+
       // Check recent trading activity (warn if none)
       if (this.realTradeFeed) {
         const recentTrades = this.realTradeFeed.getRecentTrades(tokenAddress, 10);
-        
+
         if (recentTrades.length === 0) {
           console.warn(`⚠️ [Token Validation] No recent trades detected for ${tokenAddress.substring(0, 8)}...`);
-          
+
           // Notify user but allow execution
           if (this.io) {
             this.io.emit('strategy:warning', {
@@ -973,19 +972,19 @@ export class StrategyExecutionManager {
           const lastTrade = recentTrades[recentTrades.length - 1];
           const timeSinceLastTrade = Date.now() - lastTrade.timestamp;
           const minutesSinceLastTrade = Math.floor(timeSinceLastTrade / 60000);
-          
+
           console.log(`✅ [Token Validation] Token is active - last trade ${minutesSinceLastTrade} minutes ago`);
         }
       }
-      
+
       console.log(`✅ [Token Validation] Token ${tokenAddress.substring(0, 8)}... passed validation`);
       return { valid: true };
-      
+
     } catch (error) {
       console.error(`❌ [Token Validation] Validation failed for ${tokenAddress.substring(0, 8)}...`, error);
-      return { 
-        valid: false, 
-        reason: error instanceof Error ? error.message : 'Unknown validation error' 
+      return {
+        valid: false,
+        reason: error instanceof Error ? error.message : 'Unknown validation error'
       };
     }
   }
@@ -1005,14 +1004,14 @@ export class StrategyExecutionManager {
     // Validate token before subscription
     console.log(`[StrategyExecutionManager] 🔍 Validating token before subscription...`);
     const validation = await this.validateTokenForStrategy(tokenAddress, strategy.id);
-    
+
     if (!validation.valid) {
       const errorMsg = `Cannot start strategy: ${validation.reason}`;
       console.error(`[StrategyExecutionManager] ❌ ${errorMsg}`);
-      
+
       // Stop the strategy
       await this.stopStrategy(runningId);
-      
+
       // Notify user
       if (this.io) {
         this.io.emit('strategy:failed', {
@@ -1022,7 +1021,7 @@ export class StrategyExecutionManager {
           timestamp: Date.now()
         });
       }
-      
+
       throw new Error(errorMsg);
     }
 
@@ -1032,25 +1031,25 @@ export class StrategyExecutionManager {
     console.log(`[StrategyExecutionManager] 🚀 Starting real-time trade monitoring for ${tokenAddress.substring(0, 8)}...`);
     console.log(`[StrategyExecutionManager] 📝 Token address: ${tokenAddress}`);
     const subscribed = await this.realTradeFeed.subscribeToToken(tokenAddress, runningId);
-    
+
     if (!subscribed) {
       console.error(`[StrategyExecutionManager] ❌ Failed to subscribe to token ${tokenAddress}`);
       return;
     }
-    
+
     // Register strategy filter for intelligent trade filtering
     // Extract trigger and side from strategy config stored in variables
     const strategyConfig = strategy.variables?._strategyConfig || {};
     const trigger = strategyConfig.trigger || 'mirror_sell_activity'; // FIXED: Default should be mirror_sell for buy strategies
     const side = strategyConfig.side || 'buy'; // FIXED: Default should be buy
-    
+
     console.log(`[StrategyExecutionManager] 🎯 Registering filter: trigger=${trigger}, side=${side}`);
     console.log(`[StrategyExecutionManager] 🔍 Strategy config:`, strategyConfig);
     this.realTradeFeed.registerStrategyFilter(tokenAddress, trigger, side);
-    
+
     // Normalize to lowercase ONLY for event matching (listening to emitted events)
     const normalizedToken = tokenAddress.toLowerCase();
-    
+
     // Now listen for the events using LOWERCASE token address for consistent matching
     const eventHandler = (tradeEvent: any) => {
       console.log(`\n🔔🔔🔔 [StrategyExecutionManager] TRADE EVENT RECEIVED! 🔔🔔🔔`);
@@ -1062,15 +1061,15 @@ export class StrategyExecutionManager {
       // Trigger immediate execution
       this.handleRealTimeEvent(runningId, tradeEvent);
     };
-    
+
     this.realTradeFeed.on(`trade:${normalizedToken}`, eventHandler);
     this.eventSubscriptions.set(runningId, { tokenAddress: normalizedToken, handler: eventHandler });
-    
+
     // Verify listener was registered
     const listenerCount = this.realTradeFeed.listenerCount(`trade:${normalizedToken}`);
     console.log(`[StrategyExecutionManager] ✅ Subscribed ${runningId} to trade:${normalizedToken}`);
     console.log(`[StrategyExecutionManager] 📊 Total listeners for this token: ${listenerCount}`);
-    
+
     if (listenerCount === 0) {
       console.error(`[StrategyExecutionManager] ⚠️ WARNING: Listener count is ZERO! Event handler may not be registered correctly!`);
     }
@@ -1083,14 +1082,14 @@ export class StrategyExecutionManager {
       console.log(`⚠️ [REAL TRADE EVENT] Cannot process trade for ${runningId}: not running or no context`);
       return;
     }
-    
+
     console.log(`\n🔥 ========== REAL TRADE EVENT FOR STRATEGY ==========`);
     console.log(`🔥 Strategy: ${runningId}`);
     console.log(`🔥 Current Step: ${execution.currentContext.currentStepId}`);
     console.log(`🔥 Trade Type: ${tradeEvent.type.toUpperCase()}`);
     console.log(`🔥 SOL Amount: ${tradeEvent.solAmount.toFixed(6)}`);
     console.log(`🔥 ===============================================\n`);
-    
+
     // Update strategy context with real-time data
     // This is the bridge between blockchain events and strategy logic!
     execution.currentContext.variables.lastRealTrade = tradeEvent;
@@ -1100,17 +1099,17 @@ export class StrategyExecutionManager {
     execution.currentContext.variables.realTradeSolAmount = tradeEvent.solAmount ?? tradeEvent.amountInSol;
     execution.currentContext.variables.realTradeTokenAmount = tradeEvent.tokenAmount;
     execution.currentContext.variables.realTradeSignature = tradeEvent.signature;
-    
+
     // Add token metadata for better logging
     if (tradeEvent.tokenSymbol) execution.currentContext.variables.tokenSymbol = tradeEvent.tokenSymbol;
     if (tradeEvent.tokenName) execution.currentContext.variables.tokenName = tradeEvent.tokenName;
-    
+
     // Set detectedVolume for mirror strategies
     // Reactive mirror strategies use this variable in calculate_sell_amount step
     execution.currentContext.variables.detectedVolume = tradeEvent.solAmount;
-    
+
     console.log(`✅ [REAL TRADE EVENT] Strategy ${runningId} context updated`);
-    
+
     // Emit status update to UI
     if (this.io) {
       this.io.emit('strategy:trade_detected', {
@@ -1132,15 +1131,15 @@ export class StrategyExecutionManager {
     if (!this.executionQueue.has(runningId)) {
       this.executionQueue.set(runningId, []);
     }
-    
+
     this.executionQueue.get(runningId)!.push({
       runningId,
       event: tradeEvent,
       timestamp: Date.now()
     });
-    
+
     console.log(`🚀 [REAL TRADE EVENT] Added to execution queue, triggering immediate processing`);
-    
+
     // Start processing IMMEDIATELY (not waiting for next cycle)
     if (!this.processingQueue) {
       setImmediate(() => this.processExecutionQueue());
@@ -1162,22 +1161,22 @@ export class StrategyExecutionManager {
 
         const event = events.shift()!;
         const execution = this.runningStrategies.get(runningId);
-        
+
         if (!execution) {
           console.log(`⚠️ [EXEC QUEUE] No execution found for ${runningId}`);
           continue;
         }
-        
+
         // FIXED: Allow event processing for reactive strategies even if status isn't "running"
         // Reactive strategies may be in "waiting" state but still need to process events
         const strategy = strategyBuilder.getStrategy(execution.strategyId);
         const isReactive = strategy?.name?.includes('Reactive') || strategy?.name?.includes('Mirror');
-        
+
         if (execution.status !== 'running' && !isReactive) {
           console.log(`⚠️ [EXEC QUEUE] Strategy ${runningId} not running (status: ${execution.status})`);
           continue;
         }
-        
+
         console.log(`✅ [EXEC QUEUE] Processing event for ${isReactive ? 'REACTIVE' : 'NORMAL'} strategy ${runningId}`);
 
         // Execute immediately without delay
@@ -1194,214 +1193,238 @@ export class StrategyExecutionManager {
  * Immediate action executor for real-time events
  * Actually executes the next strategy step when a matching trade is detected
  */
-private async executeImmediateAction(
-  execution: RunningStrategy,
-  event: any
-): Promise<void> {
-  console.log(`\n🚀 ========== IMMEDIATE EXECUTION ==========`);
-  console.log(`🚀 Strategy: ${execution.id}`);
-  console.log(`🚀 Current Step: ${execution.currentContext?.currentStepId}`);
-  console.log(`🚀 Event Type: ${event.event?.type || 'unknown'}`);
-  console.log(`🚀 ==========================================\n`);
-  
-  if (!execution.currentContext) {
-    console.warn(`[StrategyExecutionManager] No context for ${execution.id}, cannot execute`);
-    return;
-  }
-  
-  // Check rate limit BEFORE execution
-  if (!this.checkRateLimit(execution.strategyId)) {
-    console.error(`🚨 [RATE LIMIT] Blocking execution for ${execution.id}`);
-    this.addToDeadLetterQueue(execution.strategyId, execution.id, event, 'Rate limit exceeded');
-    return;
-  }
+  private async executeImmediateAction(
+    execution: RunningStrategy,
+    event: any
+  ): Promise<void> {
+    console.log(`\n🚀 ========== IMMEDIATE EXECUTION ==========`);
+    console.log(`🚀 Strategy: ${execution.id}`);
+    console.log(`🚀 Current Step: ${execution.currentContext?.currentStepId}`);
+    console.log(`🚀 Event Type: ${event.event?.type || 'unknown'}`);
+    console.log(`🚀 ==========================================\n`);
 
-  // Check circuit breaker BEFORE execution
-  if (!this.checkCircuitBreaker(execution.strategyId)) {
-    console.error(`🚨 [CIRCUIT BREAKER] Blocking execution for ${execution.id}`);
-    this.addToDeadLetterQueue(execution.strategyId, execution.id, event, 'Circuit breaker tripped');
-    return;
-  }
-  
-  // Prevent concurrent execution
-  if (execution.isExecuting) {
-    console.log(`⚠️ [StrategyExecutionManager] Strategy ${execution.id} already executing, queuing for next cycle`);
-    return;
-  }
-  
-  // Check if strategy is still running
-  if (execution.status !== 'running') {
-    console.log(`⚠️ [StrategyExecutionManager] Strategy ${execution.id} status is ${execution.status}, skipping execution`);
-    return;
-  }
-  
-  execution.isExecuting = true;
-  const executionStartTime = Date.now();
-  
-  try {
-    console.log(`🎯 [IMMEDIATE EXEC] Executing strategy from step: ${execution.currentContext.currentStepId}`);
-    
-    // Execute the strategy (will process current step and advance)
-    const result = await strategyBuilder.executeStrategy(
-      execution.strategyId,
-      execution.currentContext,
-      execution.abortController?.signal
-    );
-    
-    const executionDuration = Date.now() - executionStartTime;
-    
-    console.log(`📊 [IMMEDIATE EXEC] Result (${executionDuration}ms):`, {
-      success: result.success,
-      completed: result.completed,
-      currentStep: result.context.currentStepId,
-      error: result.error
-    });
-    
-    if (result.success) {
-      // Update context with result
-      execution.currentContext = result.context;
-      execution.executionCount++;
-      execution.lastExecutionTime = Date.now();
-      execution.lastResult = result;
-      
-      console.log(`✅ [IMMEDIATE EXEC] Strategy executed successfully`);
-      console.log(`   Current Step: ${result.context.currentStepId}`);
-      console.log(`   Execution Count: ${execution.executionCount}`);
-      
-      // Emit success event to UI
-      if (this.io) {
-        this.io.emit('strategy:execution_success', {
-          strategyId: execution.strategyId,
-          runningId: execution.id,
-          executionCount: execution.executionCount,
-          currentStep: result.context.currentStepId,
-          trigger: 'real_trade_event',
-          timestamp: Date.now()
-        });
-      }
-      
-      // If strategy completed, mark as stopped (completed)
-      if (result.completed) {
-        console.log(`🎉 [IMMEDIATE EXEC] Strategy ${execution.id} completed!`);
-        execution.status = 'stopped';
-      }
-      
-      // Record success for circuit breaker
-      this.recordSuccess(execution.strategyId);
-    } else {
-      console.error(`❌ [IMMEDIATE EXEC] Strategy execution failed:`, result.error);
-      
-      // Emit failure event to UI
-      if (this.io) {
-        this.io.emit('strategy:execution_failed', {
-          strategyId: execution.strategyId,
-          runningId: execution.id,
-          error: result.error,
-          trigger: 'real_trade_event',
-          timestamp: Date.now()
-        });
-      }
-      
-      // Record failure for circuit breaker
-      this.recordFailure(execution.strategyId);
-      this.addToDeadLetterQueue(execution.strategyId, execution.id, event, result.error || 'Execution failed');
+    if (!execution.currentContext) {
+      console.warn(`[StrategyExecutionManager] No context for ${execution.id}, cannot execute`);
+      return;
     }
 
-    // Track execution if enabled
-    if (execution.trackingEnabled && result.success) {
-      await this.trackExecution(execution.id, result);
+    // Check rate limit BEFORE execution
+    if (!this.checkRateLimit(execution.strategyId)) {
+      console.error(`🚨 [RATE LIMIT] Blocking execution for ${execution.id}`);
+      this.addToDeadLetterQueue(execution.strategyId, execution.id, event, 'Rate limit exceeded');
+      return;
     }
-    
-    // Handle strategy completion
-    if (result.completed) {
-      console.log(`🏁 [StrategyExecutionManager] Strategy ${execution.id} completed after immediate execution`);
-      execution.status = 'stopped';
-      if (execution.trackingEnabled) {
-        strategyExecutionTracker.completeStrategy(execution.id);
-      }
-      
-      // Emit completed event
-      if (this.io) {
-        this.io.emit('strategy:completed', {
-          strategyId: execution.strategyId,
-          runningId: execution.id,
-          timestamp: Date.now(),
-          executionCount: execution.executionCount
-        });
-      }
+
+    // Check circuit breaker BEFORE execution
+    if (!this.checkCircuitBreaker(execution.strategyId)) {
+      console.error(`🚨 [CIRCUIT BREAKER] Blocking execution for ${execution.id}`);
+      this.addToDeadLetterQueue(execution.strategyId, execution.id, event, 'Circuit breaker tripped');
+      return;
     }
-    
-    // Check if stop was requested during execution
-    if (execution.currentContext?.variables._shouldStop === true || execution.status !== 'running') {
-      console.log(`🛑 [StrategyExecutionManager] Stop condition detected after immediate execution`);
-      execution.status = 'stopped';
-      
-      // Clear any pending timeout
-      if (execution.intervalId) {
-        clearTimeout(execution.intervalId);
-        execution.intervalId = undefined;
-      }
-      
-      // Emit stopped event
-      if (this.io) {
-        this.io.emit('strategy:stopped', {
-          strategyId: execution.strategyId,
-          runningId: execution.id,
-          timestamp: Date.now(),
-          executionCount: execution.executionCount
-        });
-      }
+
+    // Prevent concurrent execution
+    if (execution.isExecuting) {
+      console.log(`⚠️ [StrategyExecutionManager] Strategy ${execution.id} already executing, queuing for next cycle`);
+      return;
     }
-    
-    // Warn if execution was slow
-    if (executionDuration > 1000) {
-      console.warn(`⚠️ [SLOW EXECUTION] Strategy ${execution.id} took ${executionDuration}ms - optimize!`);
+
+    // Check if strategy is still running
+    if (execution.status !== 'running') {
+      console.log(`⚠️ [StrategyExecutionManager] Strategy ${execution.id} status is ${execution.status}, skipping execution`);
+      return;
     }
-    
-  } catch (error) {
-    const executionEndTime = Date.now();
-    const executionDuration = executionEndTime - executionStartTime;
-    
-    console.error(`❌ [StrategyExecutionManager] Error in immediate execution after ${executionDuration}ms:`, error);
-    execution.error = error instanceof Error ? error.message : String(error);
-    execution.retryCount = (execution.retryCount || 0) + 1;
-    
-    // Record failure and add to dead letter queue
-    this.recordFailure(execution.strategyId);
-    this.addToDeadLetterQueue(execution.strategyId, execution.id, event, execution.error);
-    
-    // Emit error event
-    if (this.io) {
-      this.io.emit('strategy:error', {
-        strategyId: execution.strategyId,
-        runningId: execution.id,
-        error: execution.error,
-        timestamp: Date.now()
+
+    execution.isExecuting = true;
+    const executionStartTime = Date.now();
+
+    try {
+      console.log(`🎯 [IMMEDIATE EXEC] Executing strategy from step: ${execution.currentContext.currentStepId}`);
+
+      // Execute the strategy (will process current step and advance)
+      const result = await strategyBuilder.executeStrategy(
+        execution.strategyId,
+        execution.currentContext,
+        execution.abortController?.signal
+      );
+
+      const executionDuration = Date.now() - executionStartTime;
+
+      console.log(`📊 [IMMEDIATE EXEC] Result (${executionDuration}ms):`, {
+        success: result.success,
+        completed: result.completed,
+        currentStep: result.context.currentStepId,
+        error: result.error
       });
-    }
-    
-    // If too many failures, stop the strategy
-    const maxRetries = execution.maxRetries || 10;
-    if (execution.retryCount >= maxRetries) {
-      console.error(`❌ [StrategyExecutionManager] Strategy ${execution.id} failed ${maxRetries} times, stopping`);
-      execution.status = 'error';
-      
+
+      if (result.success) {
+        // Update context with result
+        execution.currentContext = result.context;
+        execution.executionCount++;
+        execution.lastExecutionTime = Date.now();
+        execution.lastResult = result;
+
+        console.log(`✅ [IMMEDIATE EXEC] Strategy executed successfully`);
+        console.log(`   Current Step: ${result.context.currentStepId}`);
+        console.log(`   Execution Count: ${execution.executionCount}`);
+
+        // Emit success event to UI
+        if (this.io) {
+          this.io.emit('strategy:execution_success', {
+            strategyId: execution.strategyId,
+            runningId: execution.id,
+            executionCount: execution.executionCount,
+            currentStep: result.context.currentStepId,
+            trigger: 'real_trade_event',
+            timestamp: Date.now()
+          });
+          const state = result.context.variables.state || {};
+          const context = result.context;
+          const metricUpdate = {
+            strategyId: execution.strategyId,
+            executionId: execution.id,
+            timestamp: Date.now(),
+            trades: {
+              total: context.variables._globalTradeCount || 0,
+              buy: context.variables._buyTradeCount || 0,
+              sell: context.variables._sellTradeCount || 0,
+            },
+            performance: {
+              totalPnL: state.metrics?.totalPnLUSD || 0,
+              roi: state.metrics?.roi || 0,
+              winRate: state.metrics?.winRate || 0,
+              profitFactor: state.metrics?.profitFactor || 0,
+            },
+            portfolio: {
+              balanceSOL: state.portfolio?.balanceSOL || 0,
+              balanceUSDC: state.portfolio?.balanceUSDC || 0,
+              totalValueUSD: state.portfolio?.totalValueUSD || 0,
+            }
+          };
+          this.io.emit('strategy_metrics_update', metricUpdate)
+          console.log(`📈 [METRICS UPDATE] Broadcasted metrics for ${execution.id}`);
+        }
+        // If strategy completed, mark as stopped (completed)
+        if (result.completed) {
+          console.log(`🎉 [IMMEDIATE EXEC] Strategy ${execution.id} completed!`);
+          execution.status = 'stopped';
+        }
+
+        // Record success for circuit breaker
+        this.recordSuccess(execution.strategyId);
+      } else {
+        console.error(`❌ [IMMEDIATE EXEC] Strategy execution failed:`, result.error);
+
+        // Emit failure event to UI
+        if (this.io) {
+          this.io.emit('strategy:execution_failed', {
+            strategyId: execution.strategyId,
+            runningId: execution.id,
+            error: result.error,
+            trigger: 'real_trade_event',
+            timestamp: Date.now()
+          });
+        }
+
+        // Record failure for circuit breaker
+        this.recordFailure(execution.strategyId);
+        this.addToDeadLetterQueue(execution.strategyId, execution.id, event, result.error || 'Execution failed');
+      }
+
+      // Track execution if enabled
+      if (execution.trackingEnabled && result.success) {
+        await this.trackExecution(execution.id, result);
+      }
+
+      // Handle strategy completion
+      if (result.completed) {
+        console.log(`🏁 [StrategyExecutionManager] Strategy ${execution.id} completed after immediate execution`);
+        execution.status = 'stopped';
+        if (execution.trackingEnabled) {
+          strategyExecutionTracker.completeStrategy(execution.id);
+        }
+
+        // Emit completed event
+        if (this.io) {
+          this.io.emit('strategy:completed', {
+            strategyId: execution.strategyId,
+            runningId: execution.id,
+            timestamp: Date.now(),
+            executionCount: execution.executionCount
+          });
+        }
+      }
+
+      // Check if stop was requested during execution
+      if (execution.currentContext?.variables._shouldStop === true || execution.status !== 'running') {
+        console.log(`🛑 [StrategyExecutionManager] Stop condition detected after immediate execution`);
+        execution.status = 'stopped';
+
+        // Clear any pending timeout
+        if (execution.intervalId) {
+          clearTimeout(execution.intervalId);
+          execution.intervalId = undefined;
+        }
+
+        // Emit stopped event
+        if (this.io) {
+          this.io.emit('strategy:stopped', {
+            strategyId: execution.strategyId,
+            runningId: execution.id,
+            timestamp: Date.now(),
+            executionCount: execution.executionCount
+          });
+        }
+      }
+
+      // Warn if execution was slow
+      if (executionDuration > 1000) {
+        console.warn(`⚠️ [SLOW EXECUTION] Strategy ${execution.id} took ${executionDuration}ms - optimize!`);
+      }
+
+    } catch (error) {
+      const executionEndTime = Date.now();
+      const executionDuration = executionEndTime - executionStartTime;
+
+      console.error(`❌ [StrategyExecutionManager] Error in immediate execution after ${executionDuration}ms:`, error);
+      execution.error = error instanceof Error ? error.message : String(error);
+      execution.retryCount = (execution.retryCount || 0) + 1;
+
+      // Record failure and add to dead letter queue
+      this.recordFailure(execution.strategyId);
+      this.addToDeadLetterQueue(execution.strategyId, execution.id, event, execution.error);
+
+      // Emit error event
       if (this.io) {
-        this.io.emit('strategy:failed', {
+        this.io.emit('strategy:error', {
           strategyId: execution.strategyId,
           runningId: execution.id,
           error: execution.error,
-          retryCount: execution.retryCount,
           timestamp: Date.now()
         });
       }
+
+      // If too many failures, stop the strategy
+      const maxRetries = execution.maxRetries || 10;
+      if (execution.retryCount >= maxRetries) {
+        console.error(`❌ [StrategyExecutionManager] Strategy ${execution.id} failed ${maxRetries} times, stopping`);
+        execution.status = 'error';
+
+        if (this.io) {
+          this.io.emit('strategy:failed', {
+            strategyId: execution.strategyId,
+            runningId: execution.id,
+            error: execution.error,
+            retryCount: execution.retryCount,
+            timestamp: Date.now()
+          });
+        }
+      }
+
+    } finally {
+      execution.isExecuting = false;
     }
-    
-  } finally {
-    execution.isExecuting = false;
   }
-}
-  
+
 
   /**
    * Check and reset daily limits
@@ -1409,7 +1432,7 @@ private async executeImmediateAction(
   private checkAndResetDailyLimits(): void {
     const now = new Date();
     const daysDiff = Math.floor((now.getTime() - this.lastResetDate.getTime()) / (1000 * 60 * 60 * 24));
-    
+
     if (daysDiff >= 1) {
       this.userExecutionCount.clear();
       this.lastResetDate = now;
@@ -1423,21 +1446,21 @@ private async executeImmediateAction(
    */
   private checkRateLimit(strategyId: string): boolean {
     const now = Date.now();
-    
+
     if (!this.executionRateLimiter.has(strategyId)) {
       this.executionRateLimiter.set(strategyId, []);
     }
-    
+
     const executions = this.executionRateLimiter.get(strategyId)!;
-    
+
     // Remove old executions outside window
     const recentExecutions = executions.filter(time => now - time < this.RATE_LIMIT_WINDOW_MS);
     this.executionRateLimiter.set(strategyId, recentExecutions);
-    
+
     if (recentExecutions.length >= this.MAX_EXECUTIONS_PER_MINUTE) {
       console.error(`🚨 [RATE LIMIT] Strategy ${strategyId} exceeded ${this.MAX_EXECUTIONS_PER_MINUTE} executions per minute`);
       console.error(`🚨 [RATE LIMIT] Current rate: ${recentExecutions.length} executions in last minute`);
-      
+
       // Emit alert
       if (this.io) {
         this.io.emit('strategy:rate-limit-exceeded', {
@@ -1447,7 +1470,7 @@ private async executeImmediateAction(
           timestamp: now
         });
       }
-      
+
       return false;
     }
     recentExecutions.push(now);
@@ -1462,17 +1485,17 @@ private async executeImmediateAction(
     if (this.circuitBreakerTripped.has(strategyId)) {
       console.error(`🚨 [CIRCUIT BREAKER] Strategy ${strategyId} is disabled due to repeated failures`);
       console.error(`🚨 [CIRCUIT BREAKER] Manual intervention required to re-enable`);
-      
+
       return false;
     }
-    
+
     const failures = this.failureCount.get(strategyId) || 0;
-    
+
     if (failures >= this.CIRCUIT_BREAKER_THRESHOLD) {
       this.circuitBreakerTripped.add(strategyId);
       console.error(`🚨 [CIRCUIT BREAKER] Tripping circuit breaker for strategy ${strategyId}`);
       console.error(`🚨 [CIRCUIT BREAKER] ${failures} consecutive failures detected`);
-      
+
       // Emit alert
       if (this.io) {
         this.io.emit('strategy:circuit-breaker-tripped', {
@@ -1482,19 +1505,19 @@ private async executeImmediateAction(
           timestamp: Date.now()
         });
       }
-      
+
       // Stop the strategy
       const runningId = Array.from(this.runningStrategies.entries())
         .find(([_, rs]) => rs.strategyId === strategyId)?.[0];
-      
+
       if (runningId) {
-        this.stopStrategy(runningId).catch(err => 
+        this.stopStrategy(runningId).catch(err =>
           console.error(`Failed to stop strategy after circuit breaker: ${err}`)
         );
       }
-      
+
       return false;
-    }    
+    }
     return true;
   }
 
@@ -1511,7 +1534,7 @@ private async executeImmediateAction(
   private recordFailure(strategyId: string): void {
     const currentFailures = this.failureCount.get(strategyId) || 0;
     this.failureCount.set(strategyId, currentFailures + 1);
-    
+
     console.warn(`⚠️ [FAILURE TRACKING] Strategy ${strategyId} failure count: ${currentFailures + 1}/${this.CIRCUIT_BREAKER_THRESHOLD}`);
   }
 
@@ -1524,7 +1547,7 @@ private async executeImmediateAction(
       const removed = this.deadLetterQueue.shift();
       console.warn(`⚠️ [DLQ] Dead letter queue full, removed oldest entry: ${removed?.strategyId}`);
     }
-    
+
     this.deadLetterQueue.push({
       strategyId,
       runningId,
@@ -1532,13 +1555,13 @@ private async executeImmediateAction(
       error,
       timestamp: Date.now()
     });
-    
+
     console.error(`🚨 [DEAD LETTER] Failed trade for ${strategyId}:`, {
       runningId,
       eventType: event?.type,
       error: error.substring(0, 200) // Truncate long errors
     });
-    
+
     // Emit alert
     if (this.io) {
       this.io.emit('strategy:dead-letter', {
@@ -1548,7 +1571,7 @@ private async executeImmediateAction(
         timestamp: Date.now()
       });
     }
-    
+
     // TODO: Send to external monitoring system (Datadog, Sentry, etc.)
   }
 
@@ -1575,7 +1598,7 @@ private async executeImmediateAction(
     this.circuitBreakerTripped.delete(strategyId);
     this.failureCount.set(strategyId, 0);
     console.log(`✅ [CIRCUIT BREAKER] Reset circuit breaker for ${strategyId}`);
-    
+
     if (this.io) {
       this.io.emit('strategy:circuit-breaker-reset', {
         strategyId,
@@ -1617,7 +1640,7 @@ private async executeImmediateAction(
       // Look for buy/sell steps in results
       for (const [stepId, stepResult] of Object.entries(stepResults)) {
         if (!stepResult || typeof stepResult !== 'object') continue;
-        
+
         const result = stepResult as any;
         if (!result.success) continue;
 
@@ -1712,7 +1735,7 @@ private async executeImmediateAction(
    */
   async getPaperTradingMetrics(runningId: string) {
     const runningStrategy = this.runningStrategies.get(runningId);
-    
+
     if (!runningStrategy || !runningStrategy.paperTradingSessionId) {
       return null;
     }
@@ -1725,7 +1748,7 @@ private async executeImmediateAction(
    */
   getPaperTradingTrades(runningId: string) {
     const runningStrategy = this.runningStrategies.get(runningId);
-    
+
     if (!runningStrategy || !runningStrategy.paperTradingSessionId) {
       return [];
     }
@@ -1738,7 +1761,7 @@ private async executeImmediateAction(
    */
   getPaperTradingLogs(runningId: string) {
     const runningStrategy = this.runningStrategies.get(runningId);
-    
+
     if (!runningStrategy || !runningStrategy.paperTradingSessionId) {
       return [];
     }
