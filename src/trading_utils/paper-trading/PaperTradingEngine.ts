@@ -152,7 +152,11 @@ export class PaperTradingEngine {
     sessionId: string,
     userId?: string,
     strategyId?: string,
-    config?: Partial<PaperTradingConfig> & { initialBalanceTokens?: number; tokenAddress?: string }
+    config?: Partial<PaperTradingConfig> & {
+      initialTokenBalance?: number;
+      tokenAddress?: string;
+      initialSupply?: number;
+    }
   ): Promise<PaperTradingState> {
     const mergedConfig = { ...this.defaultConfig, ...config, enabled: true };
     
@@ -181,7 +185,8 @@ export class PaperTradingEngine {
                                           strategySide === 'sell' && 
                                           tokenAddress;
     
-    const effectiveTokenBalance = shouldAutoInitForSellStrategy ? 100000 : initialTokenBalance;
+    const configuredSupply = (config as any)?.initialSupply || 1000000;
+    const effectiveTokenBalance = shouldAutoInitForSellStrategy ? configuredSupply : initialTokenBalance;
     
     if (effectiveTokenBalance > 0) {
       console.log(`💰 [PaperTradingEngine] Initializing position: ${effectiveTokenBalance} tokens${shouldAutoInitForSellStrategy ? ' (auto-init for sell strategy)' : ''}`);
@@ -371,20 +376,30 @@ export class PaperTradingEngine {
     }
 
     try {
-      // FIX #10: Fetch real-time market data with retry logic
+      // FIX #10: Fetch real-time market data with enhanced retry logic and multiple fallbacks
       let marketData = null;
       let lastError = '';
-      const maxRetries = 3;
+      const maxRetries = 5; // Increased from 3 to 5 for better reliability
       
       for (let attempt = 1; attempt <= maxRetries; attempt++) {
         try {
           marketData = await marketDataProvider.fetchTokenPrice(tokenAddress);
-          if (marketData) break;
+          if (marketData && marketData.price > 0) {
+            console.log(`✅ [Market Data] Fetched on attempt ${attempt}: $${marketData.priceUSD}`);
+            break; // Success!
+          }
+          // If price is 0 or null, retry
+          console.warn(`⚠️ [Market Data] Invalid price on attempt ${attempt}, retrying...`);
         } catch (error) {
           lastError = error instanceof Error ? error.message : String(error);
           console.warn(`[PaperTradingEngine] Market data fetch attempt ${attempt}/${maxRetries} failed: ${lastError}`);
           if (attempt < maxRetries) {
-            await new Promise(resolve => setTimeout(resolve, 1000 * attempt)); // Exponential backoff
+            // Exponential backoff with jitter to avoid thundering herd
+            const baseDelay = 1000 * Math.pow(1.5, attempt); // 1.5s, 2.25s, 3.375s, 5.06s
+            const jitter = Math.random() * 500; // 0-500ms random delay
+            const delay = baseDelay + jitter;
+            console.log(`⏳ [Market Data] Retrying in ${(delay/1000).toFixed(1)}s...`);
+            await new Promise(resolve => setTimeout(resolve, delay));
           }
         }
       }
@@ -1452,26 +1467,47 @@ export class PaperTradingEngine {
       console.log(`💡 [PaperTradingEngine] Converting "sell all" (-1) to actual amount: ${actualTokenAmount} tokens`);
     }
     
-    // AUTO-INITIALIZE: If this is a SELL strategy and we don't have this token yet,
-    // simulate that we bought 100k tokens earlier (mirror strategy assumption)
-    if (!position && strategyName.toLowerCase().includes('sell')) {
-      console.log(`🔄 [PaperTradingEngine] Auto-initializing 100k tokens for ${tokenAddress} (SELL strategy)`);
-      
-      // Fetch REAL current market price for accurate auto-initialization
-      const marketData = await marketDataProvider.fetchTokenPrice(tokenAddress);
-      
-      if (!marketData) {
-        this.log(sessionId, 'error', 'Failed to fetch market data for auto-initialization', { tokenAddress });
-        return {
-          success: false,
-          error: 'Failed to fetch market data for token auto-initialization',
-        };
-      }
-      
-      // CRITICAL FIX: Auto-initialize with NEUTRAL cost basis
-      // We're simulating that the user ALREADY OWNS these tokens at current market price
-      // This means: cost basis = current value, so initial P&L = $0.00
-      const autoInitTokens = 100000;
+      // AUTO-INITIALIZE: If this is a SELL strategy and we don't have this token yet,
+      // simulate that we bought tokens earlier (mirror strategy assumption)
+      if (!position && strategyName.toLowerCase().includes('sell')) {
+        console.log(`🔄 [PaperTradingEngine] Auto-initializing tokens for ${tokenAddress} (SELL strategy)`);
+        
+        // Fetch REAL current market price for accurate auto-initialization
+        const marketData = await marketDataProvider.fetchTokenPrice(tokenAddress);
+        
+        if (!marketData) {
+          this.log(sessionId, 'error', 'Failed to fetch market data for auto-initialization', { tokenAddress });
+          return {
+            success: false,
+            error: 'Failed to fetch market data for token auto-initialization',
+          };
+        }
+        
+        // FIX #1: Dynamic token amount based on user config or mirror trade
+        // Priority: 1) User-specified amount 2) Mirror trade amount * 10 3) Config supply 4) Default 1M
+        const detectedMirrorAmount = actualTokenAmount > 0 && actualTokenAmount !== -1 
+          ? actualTokenAmount 
+          : (state.config as any).initialSupply;
+
+        // Allow user to specify exact initial amount via config
+        const userSpecifiedAmount = (state.config as any).initialTokenBalance;
+        
+        let autoInitTokens: number;
+        if (userSpecifiedAmount && userSpecifiedAmount > 0) {
+          // User explicitly specified amount - use it
+          autoInitTokens = userSpecifiedAmount;
+          console.log(`📦 [AUTO-INIT] Using user-specified amount: ${autoInitTokens.toLocaleString()}`);
+        } else if (detectedMirrorAmount && detectedMirrorAmount > 0) {
+          // Mirror trading - use 10x the detected amount or 1M minimum
+          autoInitTokens = Math.max(detectedMirrorAmount * 10, 1000000);
+          console.log(`🔄 [AUTO-INIT] Mirror mode: 10x detected amount = ${autoInitTokens.toLocaleString()}`);
+        } else {
+          // Fallback to default 1M
+          autoInitTokens = 1000000;
+          console.log(`🎯 [AUTO-INIT] Using default amount: ${autoInitTokens.toLocaleString()}`);
+        }      console.log(`[AUTO-INIT] Detected mirror amount: ${actualTokenAmount}, Config supply: ${(state as any).config?.initialSupply}, Final: ${autoInitTokens.toLocaleString()}`);
+      console.log(`[AUTO-INIT LOGIC] Using ${detectedMirrorAmount ? '10x detected amount' : 'default 1M'} for flexible mirror trading`);
+
       const marketPrice = marketData.price; // Real token price in SOL
       const priceUSD = marketData.priceUSD; // Real token price in USD
       const solPriceUSD = marketData.solPrice; // Real SOL price in USD
@@ -1677,7 +1713,7 @@ export class PaperTradingEngine {
       state.lastTradeTime = trade.timestamp;
       state.metrics = await portfolio.calculateMetrics(strategyId, strategyName);
       
-      // TODO #2: Emit real-time balance update IMMEDIATELY after SELL trade
+      // Emit real-time balance update IMMEDIATELY after SELL trade
       if (this.io) {
         const balanceAfter = {
           sol: state.portfolio.balanceSOL,
@@ -1794,7 +1830,7 @@ export class PaperTradingEngine {
       
       // Emit WebSocket event
       if (this.io) {
-        // FIX #2: Standardize event structure to match BUY events (comprehensive metrics, proper formatting)
+        // Standardize event structure to match BUY events (comprehensive metrics, proper formatting)
         const sessionDuration = (Date.now() - state.startTime) / 60000; // in minutes
         const tradesPerMinute = sessionDuration > 0 ? state.trades.length / sessionDuration : 0;
         const allocationPercentage = state.metrics.totalValueUSD > 0 

@@ -168,14 +168,34 @@ export class TokenRouter {
           tokenInfo.metadata.bondingCurveAddress = bondingCurveAddress.toString();
           console.log(`🔍 [TokenRouter] Bonding curve address: ${bondingCurveAddress.toString().substring(0, 12)}...`);
           
-          // PRODUCTION FIX: Check graduation status from multiple sources
+          // FIX #9: Enhanced graduated token detection with multiple validation layers
           let isGraduated = pumpTokenData.isGraduated || false;
           
-          // Double-check with on-chain data if API didn't provide status
-          if (!pumpTokenData.fromAPI) {
+          // Layer 1: Check API graduation status
+          if (pumpTokenData.fromAPI) {
+            console.log(`✅ [TokenRouter] API graduation status: ${isGraduated}`);
+          }
+          
+          // Layer 2: Always double-check with on-chain data for accuracy
+          try {
             const onChainGraduated = await this.isBondingCurveGraduated(bondingCurveAddress);
-            isGraduated = onChainGraduated;
             console.log(`🔗 [TokenRouter] On-chain graduation check: ${onChainGraduated}`);
+            
+            // If on-chain says graduated but API says not, trust on-chain (source of truth)
+            if (onChainGraduated && !isGraduated) {
+              console.warn(`⚠️ [TokenRouter] Graduation mismatch! API:${isGraduated} vs On-chain:${onChainGraduated} - Using on-chain`);
+              isGraduated = onChainGraduated;
+            } else if (!pumpTokenData.fromAPI) {
+              // If no API data, use on-chain as primary
+              isGraduated = onChainGraduated;
+            }
+          } catch (error) {
+            console.error(`❌ [TokenRouter] Error checking on-chain graduation:`, error);
+            // If can't verify, assume graduated to be safe (use Jupiter which supports both)
+            if (!pumpTokenData.fromAPI) {
+              console.warn(`⚠️ [TokenRouter] Can't verify graduation - defaulting to JUPITER (safer)`);
+              isGraduated = true;
+            }
           }
           
           tokenInfo.metadata.isGraduated = isGraduated;

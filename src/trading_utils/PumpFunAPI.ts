@@ -215,10 +215,15 @@ export class PumpFunAPI {
 
   /**
    * Sell tokens on pump.fun
+   * FIX #8: Enhanced support for dynamic amounts and percentages
+   * @param tokenAmount - Can be:
+   *   - Specific number of tokens (e.g., 50000)
+   *   - Percentage string (e.g., "50%" for half position)
+   *   - -1 for "sell all"
    */
   async sellToken(
     tokenMint: string,
-    tokenAmount: number | string, // Can be number or percentage like "100%"
+    tokenAmount: number | string, // Can be number, percentage like "100%", or -1 for "all"
     slippage: number = 10,
     priorityFee: number = 0.00001
   ): Promise<PumpFunTradeResult> {
@@ -384,52 +389,91 @@ export class PumpFunAPI {
   }
 
   /**
-   * Get token metadata
+   * Get token metadata with retry logic and fallbacks
+   * FIX #7: Enhanced reliability for intermittent API failures
    */
   async getTokenMetadata(tokenMint: string): Promise<any> {
-    try {
-  // Fetching metadata for token
-      
-      const response = await fetch(`https://frontend-api.pump.fun/coins/${tokenMint}`, {
-        headers: {
-          'Accept': 'application/json',
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        },
-      });
-      
-      if (!response.ok) {
-  // API returned status for token
-        
-        // Try to read response text to see what the error is
-        try {
-          const text = await response.text();
-        } catch (e) {
-          // Ignore
-        }
-        
-        return null;
-      }
-
-      const text = await response.text();
-      
-      // Check if response is HTML (Cloudflare block or 404)
-      if (text.trim().startsWith('<!DOCTYPE') || text.trim().startsWith('<html')) {
-  // Received HTML instead of JSON - token may not exist or API is blocked
-        return null;
-      }
-
+    const maxRetries = 3;
+    let lastError = '';
+    
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
       try {
-        const data = JSON.parse(text);
-        // Successfully fetched metadata for token
-        return data;
-      } catch (parseError) {
-  // Failed to parse JSON response
+        console.log(`🔍 [PumpFun API] Fetching metadata (attempt ${attempt}/${maxRetries})...`);
+        
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 8000); // 8 second timeout
+        
+        const response = await fetch(`https://frontend-api.pump.fun/coins/${tokenMint}`, {
+          headers: {
+            'Accept': 'application/json',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          },
+          signal: controller.signal
+        });
+        
+        clearTimeout(timeout);
+        
+        if (!response.ok) {
+          console.warn(`⚠️ [PumpFun API] HTTP ${response.status} on attempt ${attempt}`);
+          
+          // Try to read response for debugging
+          try {
+            const text = await response.text();
+            if (text.length < 200) {
+              console.warn(`   Response: ${text}`);
+            }
+          } catch (e) {
+            // Ignore
+          }
+          
+          lastError = `HTTP ${response.status}`;
+          if (attempt < maxRetries) {
+            await new Promise(resolve => setTimeout(resolve, 1000 * attempt)); // Exponential backoff
+            continue;
+          }
+          return null;
+        }
+
+        const text = await response.text();
+        
+        // Check if response is HTML (Cloudflare block or 404)
+        if (text.trim().startsWith('<!DOCTYPE') || text.trim().startsWith('<html')) {
+          console.warn(`⚠️ [PumpFun API] Received HTML instead of JSON`);
+          lastError = 'HTML response (Cloudflare/404)';
+          if (attempt < maxRetries) {
+            await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
+            continue;
+          }
+          return null;
+        }
+
+        try {
+          const data = JSON.parse(text);
+          console.log(`✅ [PumpFun API] Successfully fetched metadata`);
+          return data;
+        } catch (parseError) {
+          console.error(`❌ [PumpFun API] JSON parse error:`, parseError);
+          lastError = 'JSON parse error';
+          if (attempt < maxRetries) {
+            await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
+            continue;
+          }
+          return null;
+        }
+      } catch (error) {
+        lastError = error instanceof Error ? error.message : String(error);
+        console.error(`❌ [PumpFun API] Attempt ${attempt} failed:`, lastError);
+        
+        if (attempt < maxRetries) {
+          await new Promise(resolve => setTimeout(resolve, 1000 * attempt));
+          continue;
+        }
         return null;
       }
-    } catch (error) {
-  // Error fetching token metadata
-      return null;
     }
+    
+    console.error(`❌ [PumpFun API] All ${maxRetries} attempts failed. Last error: ${lastError}`);
+    return null;
   }
 }
 

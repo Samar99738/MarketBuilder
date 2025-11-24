@@ -258,16 +258,36 @@ export class StrategyExecutionManager {
         tokenAddress = strategy.variables.tokenAddress;
       }
 
+      // FIX #6: Validate and normalize token address before session creation
       console.log(`[StrategyExecutionManager] Token address for session: ${tokenAddress || 'MISSING - will fail!'}`);
       console.log(`[StrategyExecutionManager] Strategy tokenAddress: ${(strategy as any).tokenAddress}`);
       console.log(`[StrategyExecutionManager] Strategy variables.tokenAddress: ${strategy.variables?.tokenAddress}`);
       console.log(`[StrategyExecutionManager] Is SOL address: ${tokenAddress === 'So11111111111111111111111111111111111111112'}`);
+      
+      // CRITICAL: Validate token address exists and is not SOL for pump.fun strategies
+      if (!tokenAddress || tokenAddress === 'So11111111111111111111111111111111111111112') {
+        if (strategy.name.includes('PumpFun') || strategy.name.includes('Reactive') || strategy.name.includes('Mirror')) {
+          const error = `Invalid token address for ${strategy.name}: ${tokenAddress}. Pump.fun strategies require a valid token address.`;
+          console.error(`❌ [StrategyExecutionManager] ${error}`);
+          throw new Error(error);
+        }
+      }
+      
+      // Normalize to lowercase for WebSocket matching (CRITICAL for event detection)
+      if (tokenAddress && tokenAddress !== 'So11111111111111111111111111111111111111112') {
+        const originalAddress = tokenAddress;
+        tokenAddress = tokenAddress.toLowerCase();
+        console.log(`🔄 [StrategyExecutionManager] Normalized token: ${originalAddress} → ${tokenAddress}`);
+      }
 
       const initialConfig = {
         initialBalanceSOL: initialBalanceSOL || 10,
         initialBalanceUSDC: 0,
         // For SELL strategies, simulate buying tokens first so we have something to sell
-        initialBalanceTokens: isSellStrategy ? 100000 : 0, // Start with 100k tokens for sell strategies
+        // FIX #5: Dynamic initial token balance based on strategy config
+        initialBalanceTokens: isSellStrategy 
+          ? ((strategy as any).initialTokenBalance || (strategy.variables as any)?.supply || (strategy.variables as any)?.initialSupply || 100000)
+          : 0, // Start with configured amount for sell strategies
         tokenAddress: tokenAddress, // Pass the token address to the session
       };
 
