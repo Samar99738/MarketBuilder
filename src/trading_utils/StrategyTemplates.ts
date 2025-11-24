@@ -1885,7 +1885,23 @@ export function createReactiveMirrorStrategy(config: {
         // PAPER TRADING FIX: Check if user specified initial virtual position OR auto-initialize for SELL strategies
         if (!currentPosition || currentPosition <= 0) {
           const userSpecified = context.strategyConfig?.initialTokenBalance;
-          const initialBalance = userSpecified ? parseFloat(userSpecified) : 100000; // Default 100k tokens for SELL strategies
+          // FIX #4: Dynamic initial balance - priority: user config > strategy supply > default 100K
+          const userSpecifiedBalance = (config as any).initialTokenBalance;
+          const strategySupply = config.supply;
+          const initialBalance = userSpecifiedBalance 
+            ? parseFloat(userSpecifiedBalance.toString()) 
+            : strategySupply 
+              ? parseFloat(strategySupply.toString()) 
+              : 100000; // Fallback to 100k
+          
+          console.log(`💰 [Initial Balance] Using: ${initialBalance.toLocaleString()} tokens`);
+          if (userSpecifiedBalance) {
+            console.log(`   Source: User-specified (${userSpecifiedBalance.toLocaleString()})`);
+          } else if (strategySupply) {
+            console.log(`   Source: Strategy supply (${strategySupply.toLocaleString()})`);
+          } else {
+            console.log(`   Source: Default fallback (100K)`);
+          }
 
           if (initialBalance > 0) {
             console.log(`💰 [AUTO-INIT] ${userSpecified ? 'Using user-specified' : 'Auto-initializing'} virtual position: ${initialBalance.toLocaleString()} tokens`);
