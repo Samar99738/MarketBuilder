@@ -1299,29 +1299,84 @@ export class StrategyExecutionManager {
           });
           const state = result.context.variables.state || {};
           const context = result.context;
+          
+          // Extract metrics with proper fallbacks
+          const metrics = state.metrics || {};
+          const portfolio = state.portfolio || {};
+          
+          const actualTradeCount = (state.trades && Array.isArray(state.trades) ? state.trades.length : (metrics.totalTrades || context.variables._globalTradeCount || 0));
+          
           const metricUpdate = {
             strategyId: execution.strategyId,
             executionId: execution.id,
+            runningId: execution.id, // Include runningId for UI correlation
             timestamp: Date.now(),
+            executionCount: actualTradeCount, // ACTUAL trade count for UI (not loop iterations)
+            
+            // Trade counts (CRITICAL: Use paper trading metrics for actual trade count)
             trades: {
-              total: context.variables._globalTradeCount || 0,
-              buy: context.variables._buyTradeCount || 0,
-              sell: context.variables._sellTradeCount || 0,
+              total: actualTradeCount,
+              buy: metrics.buyTrades || context.variables._buyTradeCount || 0,
+              sell: metrics.sellTrades || context.variables._sellTradeCount || 0,
             },
+            
+            // Performance metrics
             performance: {
-              totalPnL: state.metrics?.totalPnLUSD || 0,
-              roi: state.metrics?.roi || 0,
-              winRate: state.metrics?.winRate || 0,
-              profitFactor: state.metrics?.profitFactor || 0,
+              totalPnL: metrics.totalPnLUSD || metrics.totalPnL || 0,
+              totalPnLUSD: metrics.totalPnLUSD || 0,
+              realizedPnL: metrics.realizedPnL || 0,
+              realizedPnLUSD: metrics.realizedPnLUSD || 0,
+              unrealizedPnL: metrics.unrealizedPnL || 0,
+              unrealizedPnLUSD: metrics.unrealizedPnLUSD || 0,
+              roi: metrics.roi || 0,
+              winRate: metrics.winRate || 0,
+              profitFactor: metrics.profitFactor || 0,
+              maxDrawdown: metrics.maxDrawdown || 0,
+              averageWin: metrics.averageWin || 0,
+              averageLoss: metrics.averageLoss || 0,
+              winningTrades: metrics.winningTrades || 0,
+              losingTrades: metrics.losingTrades || 0,
             },
+            
+            // Portfolio balances
             portfolio: {
-              balanceSOL: state.portfolio?.balanceSOL || 0,
-              balanceUSDC: state.portfolio?.balanceUSDC || 0,
-              totalValueUSD: state.portfolio?.totalValueUSD || 0,
+              balanceSOL: portfolio.balanceSOL || 0,
+              balanceUSDC: portfolio.balanceUSDC || 0,
+              balanceTokens: portfolio.balanceTokens || 0,
+              totalValueSOL: portfolio.totalValueSOL || 0,
+              totalValueUSD: portfolio.totalValueUSD || 0,
+              positions: Array.isArray(portfolio.positions) 
+                ? portfolio.positions 
+                : (portfolio.positions instanceof Map ? Array.from(portfolio.positions.values()) : []),
             }
           };
-          this.io.emit('strategy_metrics_update', metricUpdate)
-          console.log(`📈 [METRICS UPDATE] Broadcasted metrics for ${execution.id}`);
+          
+          // Emit metrics update for both generic strategy tracking and paper trading UI
+          this.io.emit('strategy_metrics_update', metricUpdate);
+          
+          // Also emit to paper trading listeners if this is a paper trading strategy
+          if (execution.paperTradingSessionId) {
+            this.io.emit('paper:metrics:update', {
+              sessionId: execution.paperTradingSessionId,
+              metrics: {
+                ...metricUpdate.performance,
+                totalTrades: metricUpdate.trades.total,
+                buyTrades: metricUpdate.trades.buy,
+                sellTrades: metricUpdate.trades.sell,
+                executionCount: metricUpdate.executionCount, // For left panel EXECUTIONS display
+                ...metricUpdate.portfolio,
+              },
+              timestamp: metricUpdate.timestamp
+            });
+          }
+          
+          console.log(`📈 [METRICS UPDATE] Broadcasted comprehensive metrics for ${execution.id}:`, {
+            trades: metricUpdate.trades.total,
+            pnl: metricUpdate.performance.totalPnLUSD.toFixed(2),
+            roi: metricUpdate.performance.roi.toFixed(2) + '%',
+            winRate: metricUpdate.performance.winRate.toFixed(1) + '%',
+            balance: metricUpdate.portfolio.balanceSOL.toFixed(4) + ' SOL'
+          });
         }
         // If strategy completed, mark as stopped (completed)
         if (result.completed) {

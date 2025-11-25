@@ -33,8 +33,8 @@ export class PaperTradingEngine {
   private periodicUpdateInterval: NodeJS.Timeout | null = null;
   private defaultConfig: PaperTradingConfig = {
     enabled: false,
-    initialBalanceSOL: 10,
-    initialBalanceUSDC: 1000, // User starts with $1000 USD
+    initialBalanceSOL: 10, // Default: 10 SOL virtual balance
+    initialBalanceUSDC: 0, // Default: 0 USDC (focus on SOL trading)
     enableSlippage: true,
     slippagePercentage: 0.5, // 0.5%
     enableFees: true,
@@ -311,7 +311,7 @@ export class PaperTradingEngine {
         balanceSOL: mergedConfig.initialBalanceSOL,
         balanceUSDC: mergedConfig.initialBalanceUSDC,
         balanceTokens: tokenBalance,
-        totalValueUSD: mergedConfig.initialBalanceSOL * 100 + mergedConfig.initialBalanceUSDC, // Rough estimate
+        totalValueUSD: mergedConfig.initialBalanceSOL * 200 + mergedConfig.initialBalanceUSDC, // Using $200/SOL estimate
         roi: 0,
         totalPnLUSD: 0,
         primaryToken: {
@@ -482,7 +482,9 @@ export class PaperTradingEngine {
         totalCost: amountSOL,
         balanceSOL: state.portfolio.balanceSOL - amountSOL, // SUBTRACT SOL spent (buying tokens WITH SOL)
         balanceUSDC: state.portfolio.balanceUSDC, // USDC unchanged (not using USDC)
-        balanceTokens: (portfolio.getPosition(tokenAddress)?.amount || 0) + tokensReceived,
+        // CRITICAL FIX: Calculate total token balance correctly
+        // Previous balance + tokens received = new balance
+        balanceTokens: state.portfolio.balanceTokens + tokensReceived,
         trigger,
       };
 
@@ -1483,30 +1485,45 @@ export class PaperTradingEngine {
           };
         }
         
-        // FIX #1: Dynamic token amount based on user config or mirror trade
-        // Priority: 1) User-specified amount 2) Mirror trade amount * 10 3) Config supply 4) Default 1M
-        const detectedMirrorAmount = actualTokenAmount > 0 && actualTokenAmount !== -1 
-          ? actualTokenAmount 
-          : (state.config as any).initialSupply;
-
-        // Allow user to specify exact initial amount via config
+        // CRITICAL FIX: Use actual calculated mirror amount for auto-initialization
+        // Priority: 1) User config initialTokenBalance 2) Calculated mirror amount (actualTokenAmount) 3) Config supply 4) Default 1M
+        
+        // Get user-specified initial balance from config
         const userSpecifiedAmount = (state.config as any).initialTokenBalance;
         
+        // Get the actual amount being sold (this is the calculated mirror amount)
+        const calculatedMirrorAmount = actualTokenAmount > 0 && actualTokenAmount !== -1 
+          ? actualTokenAmount 
+          : null;
+        
+        // Get config supply as fallback
+        const configSupply = (state.config as any).initialSupply;
+        
         let autoInitTokens: number;
+        let initSource: string;
+        
         if (userSpecifiedAmount && userSpecifiedAmount > 0) {
-          // User explicitly specified amount - use it
+          // Priority 1: User explicitly specified initial balance
           autoInitTokens = userSpecifiedAmount;
-          console.log(`📦 [AUTO-INIT] Using user-specified amount: ${autoInitTokens.toLocaleString()}`);
-        } else if (detectedMirrorAmount && detectedMirrorAmount > 0) {
-          // Mirror trading - use 10x the detected amount or 1M minimum
-          autoInitTokens = Math.max(detectedMirrorAmount * 10, 1000000);
-          console.log(`🔄 [AUTO-INIT] Mirror mode: 10x detected amount = ${autoInitTokens.toLocaleString()}`);
+          initSource = `user-specified (${autoInitTokens.toLocaleString()})`;
+        } else if (calculatedMirrorAmount && calculatedMirrorAmount >= 1000) {
+          // Priority 2: Use calculated mirror amount (the amount strategy wants to sell)
+          // Add 20% buffer to ensure we have enough tokens for the sell
+          autoInitTokens = Math.ceil(calculatedMirrorAmount * 1.2);
+          initSource = `calculated mirror (${calculatedMirrorAmount.toLocaleString()} + 20% buffer)`;
+        } else if (configSupply && configSupply > 0) {
+          // Priority 3: Use config supply
+          autoInitTokens = configSupply;
+          initSource = `config supply (${autoInitTokens.toLocaleString()})`;
         } else {
-          // Fallback to default 1M
+          // Priority 4: Only fallback to 1M if no other option
           autoInitTokens = 1000000;
-          console.log(`🎯 [AUTO-INIT] Using default amount: ${autoInitTokens.toLocaleString()}`);
-        }      console.log(`[AUTO-INIT] Detected mirror amount: ${actualTokenAmount}, Config supply: ${(state as any).config?.initialSupply}, Final: ${autoInitTokens.toLocaleString()}`);
-      console.log(`[AUTO-INIT LOGIC] Using ${detectedMirrorAmount ? '10x detected amount' : 'default 1M'} for flexible mirror trading`);
+          initSource = 'default fallback (1M)';
+        }
+        
+        console.log(`💰 [AUTO-INIT] Initializing position: ${autoInitTokens.toLocaleString()} tokens`);
+        console.log(`💰 [AUTO-INIT] Source: ${initSource}`);
+        console.log(`💰 [AUTO-INIT] Context: userConfig=${userSpecifiedAmount || 'none'}, mirrorAmount=${calculatedMirrorAmount || 'none'}, supply=${configSupply || 'none'}`);
 
       const marketPrice = marketData.price; // Real token price in SOL
       const priceUSD = marketData.priceUSD; // Real token price in USD
@@ -1702,7 +1719,9 @@ export class PaperTradingEngine {
         totalCost: solBeforeFees,
         balanceSOL: state.portfolio.balanceSOL + solReceived, // ADD SOL received
         balanceUSDC: state.portfolio.balanceUSDC,
-        balanceTokens: position.amount - tokensToSell, // SUBTRACT tokens sold
+        // CRITICAL FIX: Calculate total token balance correctly
+        // Previous balance - tokens sold = new balance
+        balanceTokens: state.portfolio.balanceTokens - tokensToSell,
         realizedPnL,
         trigger,
       };

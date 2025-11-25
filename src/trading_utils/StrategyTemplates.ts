@@ -1885,23 +1885,35 @@ export function createReactiveMirrorStrategy(config: {
         // PAPER TRADING FIX: Check if user specified initial virtual position OR auto-initialize for SELL strategies
         if (!currentPosition || currentPosition <= 0) {
           const userSpecified = context.strategyConfig?.initialTokenBalance;
-          // FIX #4: Dynamic initial balance - priority: user config > strategy supply > default 100K
+          // CRITICAL FIX: Dynamic initial balance with intelligent defaults
+          // Priority: 1) User config initialTokenBalance 2) Strategy supply 3) Calculated from mirror amount 4) Default 1M
           const userSpecifiedBalance = (config as any).initialTokenBalance;
           const strategySupply = config.supply;
-          const initialBalance = userSpecifiedBalance 
-            ? parseFloat(userSpecifiedBalance.toString()) 
-            : strategySupply 
-              ? parseFloat(strategySupply.toString()) 
-              : 100000; // Fallback to 100k
+          const detectedMirrorAmount = context.variables.realTradeTokenAmount;
+          
+          let initialBalance: number;
+          let balanceSource: string;
+          
+          if (userSpecifiedBalance && userSpecifiedBalance > 0) {
+            // Priority 1: User explicitly set initial balance
+            initialBalance = parseFloat(userSpecifiedBalance.toString());
+            balanceSource = `user-specified (${initialBalance.toLocaleString()})`;
+          } else if (strategySupply && strategySupply > 0) {
+            // Priority 2: Use supply from config
+            initialBalance = parseFloat(strategySupply.toString());
+            balanceSource = `strategy supply (${initialBalance.toLocaleString()})`;
+          } else if (detectedMirrorAmount && detectedMirrorAmount >= 1000) {
+            // Priority 3: Calculate from detected mirror amount with 50x buffer for multiple trades
+            initialBalance = Math.ceil(detectedMirrorAmount * 50);
+            balanceSource = `calculated from mirror (${detectedMirrorAmount.toLocaleString()} x 50)`;
+          } else {
+            // Priority 4: Only use 1M as absolute last fallback
+            initialBalance = 1000000;
+            balanceSource = 'default fallback (1M)';
+          }
           
           console.log(`💰 [Initial Balance] Using: ${initialBalance.toLocaleString()} tokens`);
-          if (userSpecifiedBalance) {
-            console.log(`   Source: User-specified (${userSpecifiedBalance.toLocaleString()})`);
-          } else if (strategySupply) {
-            console.log(`   Source: Strategy supply (${strategySupply.toLocaleString()})`);
-          } else {
-            console.log(`   Source: Default fallback (100K)`);
-          }
+          console.log(`💰 [Source] ${balanceSource}`);
 
           if (initialBalance > 0) {
             console.log(`💰 [AUTO-INIT] ${userSpecified ? 'Using user-specified' : 'Auto-initializing'} virtual position: ${initialBalance.toLocaleString()} tokens`);
@@ -1984,32 +1996,30 @@ export function createReactiveMirrorStrategy(config: {
 
         let calculatedAmount: number;
 
-        // CHECK IF USER SPECIFIED A FIXED SELL AMOUNT
+        // SIZING CALCULATION: Determine how many tokens to sell
+        // Priority: 1) User-specified fixed amount 2) Mirror mode (actual token amount) 3) Percentage 4) Fixed amount from config
+        
         if (config.sellAmount && config.sellAmount > 0) {
-          // USER SPECIFIED EXACT TOKEN AMOUNT - override any calculation
+          // Priority 1: USER SPECIFIED EXACT TOKEN AMOUNT
           calculatedAmount = config.sellAmount;
-          console.log(`💎 [FIXED USER AMOUNT] User specified exact amount: ${config.sellAmount.toLocaleString()} tokens`);
-          console.log(`📊 [INFO] Ignoring detected volume - using user's fixed amount`);
-        } else if (sizingRule === 'mirror_buy_volume' || sizingRule === 'mirror_volume') {
-          // EXACT 1:1 MIRRORING: Sell the exact same token amount that buyers are buying
-          // CRITICAL FIX: Use the actual token amount from the real trade, NOT recalculated from SOL
-          // This ensures 100% accurate mirroring regardless of price slippage
+          console.log(`💎 [FIXED AMOUNT] User specified: ${config.sellAmount.toLocaleString()} tokens`);
+          console.log(`💎 [FIXED AMOUNT] Ignoring any mirror/percentage rules`);
+        } else if (sizingRule === 'mirror_buy_volume' || sizingRule === 'mirror_volume' || sizingRule === 'mirror_sell_volume') {
+          // Priority 2: MIRROR MODE - Use actual token amount from detected trade
           const mirrorTokenAmount = context.variables.realTradeTokenAmount;
           const mirrorSolAmount = context.variables.realTradeSolAmount || detectedVolumeSOL;
 
           if (mirrorTokenAmount && mirrorTokenAmount > 0) {
-            // Use actual token amount from trade (MOST ACCURATE)
+            // Use EXACT token amount from real trade (most accurate)
             calculatedAmount = mirrorTokenAmount;
-            console.log(`🎯 [MIRROR MODE] Exact 1:1 mirroring - using ACTUAL trade token amount`);
-            console.log(`📊 [MIRROR MODE] Detected buy: ${mirrorTokenAmount.toFixed(2)} tokens (${mirrorSolAmount.toFixed(6)} SOL)`);
-            console.log(`📊 [MIRROR MODE] Will sell EXACTLY: ${Math.floor(calculatedAmount).toLocaleString()} tokens`);
+            console.log(`🎯 [MIRROR MODE] Exact 1:1 mirroring`);
+            console.log(`📊 [DETECTED] Buy trade: ${mirrorTokenAmount.toLocaleString()} tokens (${mirrorSolAmount.toFixed(6)} SOL)`);
+            console.log(`📊 [WILL SELL] EXACTLY: ${Math.floor(calculatedAmount).toLocaleString()} tokens`);
           } else {
-            // Fallback: Calculate from SOL amount (less accurate due to price movement)
+            // Fallback: Calculate from SOL amount using current price
             calculatedAmount = mirrorSolAmount / currentPrice;
-            console.log(`⚠️ [MIRROR MODE] Token amount not available, calculating from SOL`);
-            console.log(`📊 [MIRROR MODE] Detected buy: ${mirrorSolAmount.toFixed(6)} SOL`);
-            console.log(`📊 [MIRROR MODE] Current price: ${currentPrice.toFixed(10)} SOL per token`);
-            console.log(`📊 [MIRROR MODE] Calculated: ${calculatedAmount.toFixed(2)} tokens`);
+            console.log(`⚠️ [MIRROR MODE] Token amount not in trade data, calculating from SOL`);
+            console.log(`📊 [CALCULATED] ${mirrorSolAmount.toFixed(6)} SOL / ${currentPrice.toFixed(10)} = ${calculatedAmount.toFixed(0)} tokens`);
           }
         } else if (sizingRule === 'percentage') {
           // Percentage of position (5% default)
@@ -2204,24 +2214,37 @@ export function createReactiveMirrorStrategy(config: {
 
         let calculatedSOL: number;
 
-        // CHECK IF USER SPECIFIED A FIXED BUY AMOUNT
+        // SIZING CALCULATION: Determine how much SOL to use for buying
+        // Priority: 1) User-specified fixed amount 2) Mirror mode (actual SOL/token amount) 3) Default
+        
         if (config.buyAmount && config.buyAmount > 0) {
-          // USER SPECIFIED EXACT SOL AMOUNT - override any calculation
+          // Priority 1: USER SPECIFIED EXACT SOL AMOUNT
           calculatedSOL = config.buyAmount;
-          console.log(`💎 [FIXED USER AMOUNT] User specified exact amount: ${config.buyAmount.toFixed(6)} SOL`);
-          console.log(`📊 [INFO] Ignoring detected sell volume - using user's fixed amount`);
-        } else if (sizingRule === 'mirror_sell_volume') {
-          // EXACT 1:1 MIRRORING: Buy the exact same token amount that sellers are selling
-          // Convert detected token volume to SOL amount using current price
-          calculatedSOL = detectedTokenVolume * currentPrice;
-
-          console.log(`🎯 [MIRROR MODE] Exact 1:1 mirroring enabled`);
-          console.log(`📊 [MIRROR MODE] Detected sell: ${detectedTokenVolume.toLocaleString()} tokens`);
-          console.log(`📊 [MIRROR MODE] Current price: ${currentPrice.toFixed(10)} SOL per token`);
-          console.log(`📊 [MIRROR MODE] Raw calculation: ${calculatedSOL.toFixed(6)} SOL`);
-          console.log(`📊 [MIRROR MODE] Will buy with EXACTLY: ${calculatedSOL.toFixed(6)} SOL`);
+          console.log(`💎 [FIXED AMOUNT] User specified: ${config.buyAmount.toFixed(6)} SOL`);
+          console.log(`💎 [FIXED AMOUNT] Ignoring any mirror/percentage rules`);
+        } else if (sizingRule === 'mirror_sell_volume' || sizingRule === 'mirror_volume') {
+          // Priority 2: MIRROR MODE - Try to use actual SOL amount from detected trade first
+          const mirrorSolAmount = context.variables.realTradeSolAmount;
+          const mirrorTokenAmount = context.variables.realTradeTokenAmount;
+          
+          if (mirrorSolAmount && mirrorSolAmount > 0) {
+            // Use EXACT SOL amount from real trade (most accurate)
+            calculatedSOL = mirrorSolAmount;
+            console.log(`🎯 [MIRROR MODE] Exact 1:1 mirroring`);
+            console.log(`📊 [DETECTED] Sell trade: ${mirrorSolAmount.toFixed(6)} SOL (${mirrorTokenAmount?.toLocaleString() || 'N/A'} tokens)`);
+            console.log(`📊 [WILL BUY] With EXACTLY: ${calculatedSOL.toFixed(6)} SOL`);
+          } else if (detectedTokenVolume > 0) {
+            // Fallback: Calculate from token volume using current price
+            calculatedSOL = detectedTokenVolume * currentPrice;
+            console.log(`🎯 [MIRROR MODE] Calculating from token volume`);
+            console.log(`📊 [CALCULATED] ${detectedTokenVolume.toLocaleString()} tokens × ${currentPrice.toFixed(10)} = ${calculatedSOL.toFixed(6)} SOL`);
+          } else {
+            // No mirror data available, use default
+            calculatedSOL = 0.01;
+            console.log(`⚠️ [MIRROR MODE] No mirror data available, using default: ${calculatedSOL} SOL`);
+          }
         } else {
-          // Fallback: use fixed amount or default
+          // Fallback: use config buyAmount or default
           calculatedSOL = config.buyAmount || 0.01;
           console.log(`⚠️ [DEFAULT] Unknown sizingRule '${sizingRule}', using ${calculatedSOL} SOL`);
         }

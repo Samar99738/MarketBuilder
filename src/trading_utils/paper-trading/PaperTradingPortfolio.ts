@@ -26,7 +26,7 @@ export class PaperTradingPortfolio {
     this.portfolio = {
       balanceSOL: initialBalanceSOL,
       balanceUSDC: initialBalanceUSDC,
-      balanceTokens: 0,
+      balanceTokens: 0, // Will be updated with first trade or auto-init
       positions: new Map(),
       totalValueSOL: initialBalanceSOL,
       totalValueUSD: initialBalanceSOL * estimatedSolPrice + initialBalanceUSDC,
@@ -63,10 +63,15 @@ export class PaperTradingPortfolio {
 
     this.trades.push(trade);
 
-    // Update balances
+    // Update balances from trade execution
     this.portfolio.balanceSOL = trade.balanceSOL;
     this.portfolio.balanceUSDC = trade.balanceUSDC;
     this.portfolio.balanceTokens = trade.balanceTokens;
+    
+    // Log balance updates for debugging
+    if (this.trades.length <= 5 || this.trades.length % 10 === 0) {
+      console.log(`💼 [Portfolio Update #${this.trades.length}] SOL: ${trade.balanceSOL.toFixed(4)}, Tokens: ${trade.balanceTokens.toLocaleString()}`);
+    }
 
     // Update or create position
     if (trade.type === 'buy') {
@@ -254,10 +259,11 @@ export class PaperTradingPortfolio {
     const winningTrades = profitableTrades.length;
     const losingTradesCount = losingTrades.length;
 
-    // Calculate winRate based on completed trades (buys + sells)
-    // If we have NO sell trades yet, show 0% winRate (not undefined/NaN)
-    // If we have sell trades, calculate based on profitable vs losing sells
-    const winRate = sellTrades.length > 0 ? (winningTrades / sellTrades.length) * 100 : 0;
+    // Calculate winRate = (Profitable Trades / Total Completed Sell Trades) * 100
+    // Only sell trades can realize profit/loss, so we count those
+    // If no sell trades yet, winRate is 0% (haven't closed any positions)
+    const completedSellTrades = sellTrades.length;
+    const winRate = completedSellTrades > 0 ? (winningTrades / completedSellTrades) * 100 : 0;
 
     console.log('📊 [Portfolio Metrics] Win/Loss Analysis:', {
       totalTrades: this.trades.length,
@@ -315,8 +321,11 @@ export class PaperTradingPortfolio {
     const unrealizedPnLPercentage = (unrealizedPnLUSD / initialValueUSD) * 100;
     const totalPnLPercentage = (totalPnLUSD / initialValueUSD) * 100;
 
-    // ROI
-    const roi = ((this.portfolio.totalValueUSD - this.portfolio.initialBalanceUSD) / this.portfolio.initialBalanceUSD) * 100;
+    // ROI = (Current Value - Initial Investment) / Initial Investment * 100
+    // This shows percentage gain/loss on initial capital
+    const initialInvestment = this.portfolio.initialBalanceUSD;
+    const currentValue = this.portfolio.totalValueUSD;
+    const roi = initialInvestment > 0 ? ((currentValue - initialInvestment) / initialInvestment) * 100 : 0;
 
     // Time-based metrics
     const duration = Date.now() - this.startTime;
