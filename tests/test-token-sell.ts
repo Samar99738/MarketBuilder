@@ -18,7 +18,7 @@ async function testTokenSell() {
     'test-strategy',
     {
       initialBalanceSOL: 1,
-      initialBalanceTokens: 100000,
+      initialTokenBalance: 100000,
       tokenAddress: tokenAddress
     }
   );
