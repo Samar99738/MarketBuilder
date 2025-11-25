@@ -3474,7 +3474,7 @@
                     losingTrades: metrics?.losingTrades || 0,
                     totalFeesUSD: feesUSD
                 });
-            }
+            } 
 
             // Update Advanced Metrics Panel Display
             function updateAdvancedMetrics(data) {
@@ -3492,7 +3492,7 @@
 
                 const panel = document.getElementById('advancedMetricsPanel');
 
-                // ✅ FIX: Show panel immediately when strategy is active, not just when hasExecutions > 0
+                // Show panel immediately when strategy is active, not just when hasExecutions > 0
                 const activeView = document.getElementById('activeStrategyView');
                 const isStrategyActive = activeView && activeView.style.display !== 'none';
 
