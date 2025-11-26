@@ -37,14 +37,15 @@ router.post('/sessions', asyncHandler(async (req: Request, res: Response) => {
     throw new ValidationError('sessionId is required');
   }
 
-  // Validate tokenAddress is present in config
+  // Set default tokenAddress if not provided (SOL address)
   if (!config?.tokenAddress) {
-    throw new ValidationError('tokenAddress is required in config for paper trading session creation');
+    config.tokenAddress = 'So11111111111111111111111111111111111111112';
+    console.log('⚠️ No tokenAddress provided, using SOL address as default');
   }
 
-  // Validate tokenAddress format (44 characters for Solana address)
-  if (config.tokenAddress.length !== 44) {
-    throw new ValidationError(`Invalid tokenAddress format. Expected 44 characters, got ${config.tokenAddress.length}`);
+  // Validate tokenAddress format (32-44 characters for Solana address)
+  if (config.tokenAddress.length < 32 || config.tokenAddress.length > 44) {
+    throw new ValidationError(`Invalid tokenAddress format. Expected 32-44 characters, got ${config.tokenAddress.length}. Received: ${config.tokenAddress}`);
   }
 
   const session = await paperTradingEngine.createSession(

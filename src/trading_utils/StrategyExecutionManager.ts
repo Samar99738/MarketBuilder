@@ -280,24 +280,63 @@ export class StrategyExecutionManager {
         console.log(`🔄 [StrategyExecutionManager] Normalized token: ${originalAddress} → ${tokenAddress}`);
       }
 
-      const initialConfig = {
+      // Log all possible sources of supply information for debugging
+      console.log(`🔍 [StrategyExecutionManager] ===== SUPPLY DEBUG START =====`);
+      console.log(`🔍 [StrategyExecutionManager] Supply sources:`, {
+        'strategy.initialTokenBalance': (strategy as any).initialTokenBalance,
+        'strategy.config?.supply': (strategy as any).config?.supply,
+        'strategy.variables?.supply': (strategy.variables as any)?.supply,
+        'strategy.variables?.initialSupply': (strategy.variables as any)?.initialSupply,
+        'strategy.variables?._strategyConfig': (strategy.variables as any)?._strategyConfig,
+        'isSellStrategy': isSellStrategy
+      });
+      console.log(`🔍 [StrategyExecutionManager] Strategy object keys:`, Object.keys(strategy));
+      console.log(`🔍 [StrategyExecutionManager] Strategy variables:`, strategy.variables);
+      console.log(`🔍 [StrategyExecutionManager] ===== SUPPLY DEBUG END =====`);
+
+      const initialConfig: any = {
         initialBalanceSOL: initialBalanceSOL || 10,
         initialBalanceUSDC: 0,
-        // For SELL strategies, simulate buying tokens first so we have something to sell
-        // FIX #5: Dynamic initial token balance based on strategy config
+        // For SELL strategies, get initial token balance from multiple sources with proper priority
         initialBalanceTokens: isSellStrategy 
-          ? ((strategy as any).initialTokenBalance || (strategy.variables as any)?.supply || (strategy.variables as any)?.initialSupply || 100000)
-          : 0, // Start with configured amount for sell strategies
+          ? this.extractInitialTokenBalance(strategy)
+          : 0,
         tokenAddress: tokenAddress, // Pass the token address to the session
       };
+
+      // Pass through initialTokenBalance to config for auto-init logic in PaperTradingEngine
+      if (isSellStrategy) {
+        const supplyValue = (strategy as any).initialTokenBalance || (strategy as any).config?.supply || (strategy.variables as any)?.supply || (strategy.variables as any)?.initialSupply || 100000;
+        initialConfig.initialTokenBalance = supplyValue;
+        console.log(`✅✅✅ [StrategyExecutionManager] Setting initialTokenBalance for SELL strategy: ${supplyValue.toLocaleString()}`);
+        console.log(`✅ [StrategyExecutionManager] Supply came from: ${
+          (strategy as any).initialTokenBalance ? 'strategy.initialTokenBalance' :
+          (strategy as any).config?.supply ? 'strategy.config.supply' :
+          (strategy.variables as any)?.supply ? 'strategy.variables.supply' :
+          (strategy.variables as any)?.initialSupply ? 'strategy.variables.initialSupply' :
+          'DEFAULT (100000)'
+        }`);
+      }
 
       // Check if existing session is provided and actually exists
       if (existingPaperSessionId) {
         const sessionExists = paperTradingEngine.getSession(existingPaperSessionId);
         if (sessionExists) {
           paperTradingSessionId = existingPaperSessionId;
-          awsLogger.info('✅ Using existing paper trading session', {
-            metadata: { strategyId, runningId, sessionId: paperTradingSessionId }
+          
+          // CRITICAL FIX: Update session config with strategy-specific settings (like initialTokenBalance)
+          // The session may have been created with default config, but now we have strategy-specific requirements
+          console.log(`🔧🔧🔧 [StrategyExecutionManager] Updating existing session config with strategy settings`);
+          console.log(`🔧 [StrategyExecutionManager] initialConfig being sent:`, initialConfig);
+          const updateSuccess = paperTradingEngine.updateConfig(existingPaperSessionId, initialConfig);
+          if (updateSuccess) {
+            console.log(`✅✅✅ [StrategyExecutionManager] Session config updated with initialTokenBalance: ${initialConfig.initialTokenBalance?.toLocaleString() || 'none'}`);
+          } else {
+            console.log(`❌❌❌ [StrategyExecutionManager] Failed to update session config!`);
+          }
+          
+          awsLogger.info('✅ Using existing paper trading session (config updated)', {
+            metadata: { strategyId, runningId, sessionId: paperTradingSessionId, initialTokenBalance: initialConfig.initialTokenBalance }
           });
         } else {
           // Session ID provided but doesn't exist - create it with FIX #7: timeout
@@ -1850,6 +1889,31 @@ export class StrategyExecutionManager {
   isPaperTradingMode(runningId: string): boolean {
     const runningStrategy = this.runningStrategies.get(runningId);
     return runningStrategy?.paperTradingMode === 'paper';
+  }
+
+  /**
+   * Extract initial token balance with intelligent fallback priority
+   * Priority: config.supply > initialTokenBalance > variables.supply > 100K fallback
+   */
+  private extractInitialTokenBalance(strategy: any): number {
+    const sources = [
+      { name: 'config.supply', value: strategy.config?.supply },
+      { name: 'initialTokenBalance', value: strategy.initialTokenBalance },
+      { name: 'variables.supply', value: (strategy.variables as any)?.supply },
+      { name: 'variables.initialSupply', value: (strategy.variables as any)?.initialSupply },
+    ];
+    
+    console.log(`🔍 [extractInitialTokenBalance] Checking token balance sources:`);
+    for (const source of sources) {
+      console.log(`   ${source.name}: ${source.value || 'undefined'}`);
+      if (source.value && source.value > 0) {
+        console.log(`✅ [extractInitialTokenBalance] Using ${source.name} = ${source.value.toLocaleString()} tokens`);
+        return source.value;
+      }
+    }
+    
+    console.warn(`⚠️ [extractInitialTokenBalance] No supply found, using fallback: 100,000 tokens`);
+    return 100000;
   }
 }
 

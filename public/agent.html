@@ -117,10 +117,6 @@
                         <!-- Optional: Metrics -->
                         <div class="metrics">
                             <div class="metric">
-                                <span class="label">Total:</span>
-                                <span id="total-value-usd">$0.00</span>
-                            </div>
-                            <div class="metric">
                                 <span class="label">ROI:</span>
                                 <span id="roi" class="neutral">0.00%</span>
                             </div>
@@ -139,6 +135,14 @@
                             transactions will be executed.
                         </p>
                     </div>
+                    
+                    <!-- Reset Paper Trading Button -->
+                    <button class="reset-paper-btn" onclick="resetPaperTradingSession()" 
+                            style="width: 100%; margin-top: 12px; padding: 8px 12px; background: rgba(239, 68, 68, 0.15); 
+                                   border: 1px solid rgba(239, 68, 68, 0.3); color: #ef4444; border-radius: 6px; 
+                                   cursor: pointer; font-size: 12px; font-weight: 600; transition: all 0.2s;">
+                        🔄 Reset Paper Trading
+                    </button>
                 </div>
             </div>
 
@@ -2056,8 +2060,9 @@
                     const changeElement = document.getElementById('solPriceChange');
 
                     priceElement.textContent = `$${priceData.price.toFixed(2)}`;
-                    changeElement.textContent = 'Error';
-                    changeElement.className = 'sol-price-change error';
+                    changeElement.textContent = 'Offline';
+                    changeElement.className = 'sol-price-change';
+                    changeElement.style.color = 'var(--text-secondary)';
 
                     lastSolPrice = priceData.price;
                 }
@@ -2184,21 +2189,61 @@
              */
             async function loadPaperTradingSession() {
                 try {
-                    // Check if we have an active session
-                    if (currentPaperSessionId) {
-                        const response = await fetch(`/api/v1/paper-trading/sessions/${currentPaperSessionId}`);
-                        if (response.ok) {
-                            const session = await response.json();
-                            console.log('📊 Loaded existing paper session:', session);
-                            updatePaperTradingMetrics(session);
-                            startPaperMetricsPolling();
-                            return;
+                    // CRITICAL FIX: Always start fresh - clear any old sessions
+                    const savedDefaultSession = localStorage.getItem('defaultPaperSessionId');
+                    if (savedDefaultSession) {
+                        console.log('🗑️ Clearing old session:', savedDefaultSession);
+                        try {
+                            await fetch(`/api/v1/paper-trading/sessions/${savedDefaultSession}`, {
+                                method: 'DELETE'
+                            });
+                        } catch (e) {
+                            console.warn('Could not delete old session:', e);
                         }
+                        localStorage.removeItem('defaultPaperSessionId');
                     }
+                    
+                    // Reset session ID to ensure fresh start
+                    currentPaperSessionId = null;
 
-                    // No active session - don't create one automatically
-                    // Paper trading sessions should only be created when a strategy is started
-                    console.log('ℹ️ No active paper trading session. Session will be created when strategy starts.');
+                    // CREATE DEFAULT SESSION AUTOMATICALLY
+                    console.log('📊 No active session found, creating default paper trading session...');
+                    const defaultSessionId = `paper-default-${Date.now()}`;
+                    const createResponse = await fetch('/api/v1/paper-trading/sessions', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            sessionId: defaultSessionId,
+                            userId: 'default-user',
+                            strategyId: 'default',
+                            config: {
+                                initialBalanceSOL: 10,
+                                initialBalanceUSDC: 0,
+                                initialBalanceTokens: 0,
+                                tokenAddress: 'So11111111111111111111111111111111111111112',
+                                enabled: true,
+                                enableSlippage: true,
+                                slippagePercentage: 0.5,
+                                enableFees: true,
+                                tradingFeePercentage: 0.25,
+                                networkFeeSOL: 0.000005,
+                                dataSource: 'jupiter'
+                            }
+                        })
+                    });
+                    if (createResponse.ok) {
+                        const session = await createResponse.json();
+                        currentPaperSessionId = session.data?.sessionId || defaultSessionId;
+                        console.log('✅ Created default paper trading session:', currentPaperSessionId);
+                        localStorage.setItem('defaultPaperSessionId', currentPaperSessionId);
+                        if (session.data) {
+                            updatePaperTradingMetrics(session.data);
+                        }
+                        startPaperMetricsPolling();
+                    } else {
+                        console.error('❌ Failed to create default session:', await createResponse.text());
+                        initializeVirtualBalance();
+                    }
                     return;
 
                 } catch (error) {
@@ -2224,8 +2269,9 @@
                         }
                     }
 
-                    // Clear from storage
+                    // Clear ALL storage keys
                     localStorage.removeItem('paperSessionId');
+                    localStorage.removeItem('defaultPaperSessionId');
                     currentPaperSessionId = null;
 
                     // Clear metrics display
@@ -2234,7 +2280,16 @@
                         paperMetricsInterval = null;
                     }
 
-                    showNotification('✅ Paper trading session cleared. New session will be created when you start a strategy.', 'success');
+                    // Reset UI to default values
+                    initializeVirtualBalance();
+                    
+                    // Clear live trade feed
+                    clearTradeFeed();
+
+                    showNotification('✅ Paper trading reset! Starting fresh with 10 SOL.', 'success');
+                    
+                    // Reload paper trading session to create fresh one
+                    await loadPaperTradingSession();
                 } catch (error) {
                     console.error('❌ Failed to reset paper session:', error);
                     showNotification('Failed to reset paper trading session', 'error');
@@ -2313,26 +2368,34 @@
                     balanceText = `${balanceSOL.toFixed(4)} SOL / ${balanceUSDC.toFixed(2)} USDC`;
                 }
 
-                document.getElementById('paperBalance').textContent =
-                    `${balanceSOL.toFixed(4)} SOL / ${balanceUSDC.toFixed(2)} USDC`;
+                const paperBalanceElement = document.getElementById('paperBalance');
+                if (paperBalanceElement) {
+                    paperBalanceElement.textContent = `${balanceSOL.toFixed(4)} SOL / ${balanceUSDC.toFixed(2)} USDC`;
+                }
 
                 // Update P&L - Use USD values
                 const totalPnL = metrics.totalPnLUSD || metrics.totalPnL || 0;
                 const pnlElement = document.getElementById('paperPnL');
-                pnlElement.textContent = `${totalPnL >= 0 ? '+' : ''}${totalPnL.toFixed(2)} USD`;
-                pnlElement.className = `metric-value ${totalPnL >= 0 ? 'profit' : 'loss'}`;
+                if (pnlElement) {
+                    pnlElement.textContent = `${totalPnL >= 0 ? '+' : ''}${totalPnL.toFixed(2)} USD`;
+                    pnlElement.className = `metric-value ${totalPnL >= 0 ? 'profit' : 'loss'}`;
+                }
 
                 // Update ROI - Use roi (total value change) not totalPnLPercentage (realized only)
                 const roi = metrics.roi || metrics.totalPnLPercentage || 0;
                 const roiElement = document.getElementById('paperROI');
-                roiElement.textContent = `${roi >= 0 ? '+' : ''}${roi.toFixed(2)}%`;
-                roiElement.className = `metric-value ${roi >= 0 ? 'profit' : 'loss'}`;
+                if (roiElement) {
+                    roiElement.textContent = `${roi >= 0 ? '+' : ''}${roi.toFixed(2)}%`;
+                    roiElement.className = `metric-value ${roi >= 0 ? 'profit' : 'loss'}`;
+                }
 
                 // Update trades
                 const totalTrades = metrics.totalTrades || 0;
                 const winRate = metrics.winRate || 0;
-                document.getElementById('paperTrades').textContent =
-                    `${totalTrades} (${winRate.toFixed(1)}% win)`;
+                const paperTradesElement = document.getElementById('paperTrades');
+                if (paperTradesElement) {
+                    paperTradesElement.textContent = `${totalTrades} (${winRate.toFixed(1)}% win)`;
+                }
 
                 // CRITICAL FIX: Also update RIGHT panel and Advanced Metrics with the same data!
                 updateLiveMetrics({
@@ -2635,11 +2698,16 @@
                 });
 
                 // ==================== UPDATE SOL BALANCE ====================
-                const solBalance = data.balanceSOL || 0;
-                const solElement = document.getElementById('balance-sol');
-                if (solElement) {
-                    solElement.textContent = solBalance.toFixed(4);
-                    console.log(`✅ [SOL] Updated to: ${solBalance.toFixed(4)}`);
+                // Add validation before updating
+                if (typeof data.balanceSOL === 'undefined') {
+                    console.warn('⚠️ Missing balanceSOL in update, skipping SOL update');
+                } else {
+                    const solBalance = data.balanceSOL ?? 0;
+                    const solElement = document.getElementById('balance-sol');
+                    if (solElement) {
+                        solElement.textContent = solBalance.toFixed(4);
+                        console.log(`✅ [SOL] Updated to: ${solBalance.toFixed(4)}`);
+                    }
                 }
 
                 // ==================== UPDATE TOKEN BALANCE (DYNAMIC!) ====================
@@ -2662,7 +2730,8 @@
                         tokenLabelElement.textContent = tokenSymbol;
                     }
 
-                    console.log(`✅ [TOKEN] Updated to: ${tokenBalance} ${tokenSymbol}`);
+                    console.log(`✅ [TOKEN] Updated to: ${tokenBalance.toLocaleString()} ${tokenSymbol}`);
+                    console.log(`✅ [TOKEN] Data source: primaryToken from WebSocket event`);
                 }
                 // Priority 2: Check if balanceTokens exists (fallback)
                 else if (data.balanceTokens && data.balanceTokens > 0 && data.primaryToken?.symbol) {
@@ -2770,17 +2839,14 @@
                         });
                     }
 
-                    // IMPORTANT: Only update metrics from simulation if it's NOT immediately after a trade
-                    // paper:trade:executed should be the primary source of truth for metrics after trades
-                    // This prevents the simulation update from overwriting trade metrics with slightly different values
-
-                    // Only update if this is a periodic update (not buy_simulation or sell_simulation after a trade)
+                    // CRITICAL FIX: Never update execution count from simulation updates
+                    // Only paper:trade:executed should update execution count to avoid double-counting
+                    // Simulation updates are for portfolio snapshots only
                     if (data.type !== 'buy_simulation' && data.type !== 'sell_simulation') {
-                        const enhancedMetrics = {
-                            executions: strategyInfo.executionCount || 0,
+                        // Update portfolio metrics only (NOT execution count)
+                        const portfolioMetrics = {
                             pnl: snapshot.totalPnLUSD || snapshot.totalPnL || 0,
                             roi: snapshot.roi || 0,
-                            winRate: 0, // Win rate not available in simulation updates
 
                             // Enhanced financial details
                             unrealizedPnL: snapshot.unrealizedPnLUSD || 0,
@@ -2797,7 +2863,8 @@
                             tokenAllocation: snapshot.allocation?.tokenPercentage || 0,
                         };
 
-                        updateLiveMetrics(enhancedMetrics);
+                        // Update portfolio metrics without touching execution count
+                        updatePortfolioMetrics(portfolioMetrics);
                     }
                 }
             });
@@ -3338,6 +3405,35 @@
             }
 
             // Update Live Metrics with Enhanced Display (NO CONSOLE LOGS)
+            /**
+             * Update portfolio metrics only (for simulation updates)
+             * Does NOT update execution count to prevent double-counting
+             */
+            function updatePortfolioMetrics(metrics) {
+                // Update P&L
+                const pnl = metrics?.pnl ?? metrics?.totalPnLUSD ?? 0;
+                const pnlValue = Number(pnl) || 0;
+                const pnlElement = document.getElementById('totalPnL');
+                if (pnlElement) {
+                    pnlElement.textContent = `${pnlValue >= 0 ? '+' : ''}$${pnlValue.toFixed(2)}`;
+                    pnlElement.className = `metric-value ${pnlValue >= 0 ? 'profit' : 'loss'}`;
+                }
+
+                // Update ROI
+                const roi = metrics?.roi ?? 0;
+                const roiValue = Number(roi) || 0;
+                const roiElement = document.getElementById('roi');
+                if (roiElement) {
+                    roiElement.textContent = `${roiValue >= 0 ? '+' : ''}${roiValue.toFixed(2)}%`;
+                    roiElement.className = `metric-value ${roiValue >= 0 ? 'profit' : 'loss'}`;
+                }
+
+                console.log('📊 [updatePortfolioMetrics] Updated portfolio metrics (execution count unchanged):', {
+                    pnl: pnlValue,
+                    roi: roiValue
+                });
+            }
+
             function updateLiveMetrics(metrics) {
                 console.log('🔍 [updateLiveMetrics] RAW metrics received:', {
                     fullMetricsObject: metrics,

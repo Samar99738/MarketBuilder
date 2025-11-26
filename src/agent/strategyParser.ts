@@ -298,6 +298,8 @@ export class StrategyParser {
       const patterns = [
         // "buy 0.25", "sell 0.9975"
         new RegExp(`${keyword}(?:ing)?\\s+(\\d+\\.?\\d*)`, 'i'),
+        // "supply of 14", "have of 10"
+        new RegExp(`${keyword}(?:ing)?\\s+of\\s+(\\d+\\.?\\d*)`, 'i'),
         // "0.25 to buy"
         new RegExp(`(\\d+\\.?\\d*)\\s+(?:to|for)?\\s*${keyword}`, 'i'),
         // "buy: 0.25"
@@ -744,8 +746,8 @@ export class StrategyParser {
     // Extract token address
     const tokenAddress = this.extractTokenAddress(text);
     
-    // Extract supply/amount
-    const supply = this.extractNumber(text, ['supply', 'have', 'holding', 'own', 'million', 'thousand'], undefined);
+    // Extract supply/amount with better parsing
+    const supply = this.extractSupply(text);
     
     // Determine trigger type
     let trigger = 'unknown';
@@ -801,7 +803,7 @@ export class StrategyParser {
         strategyType: 'reactive',
         description: triggerDescription || `Reactive ${isSell ? 'selling' : 'buying'} strategy`,
         tokenAddress,
-        supply: supply ? supply * 1000000 : undefined, // Convert millions to actual units
+        supply: supply, // Already in correct units from extractSupply
         trigger,
         side: isSell ? 'sell' : 'buy',
         components: [
@@ -820,6 +822,56 @@ export class StrategyParser {
       confidence,
       requiresConfirmation: true
     };
+  }
+
+  /**
+   * Extract token supply from text with intelligent unit parsing
+   * Handles: "15 million", "15M", "15000000", etc.
+   */
+  private extractSupply(text: string): number | undefined {
+    const lowerText = text.toLowerCase();
+    
+    // Pattern 1: Explicit "X million" or "X M"
+    const millionMatch = lowerText.match(/(\d+(?:\.\d+)?)\s*(?:million|m\b)/i);
+    if (millionMatch) {
+      const value = parseFloat(millionMatch[1]) * 1000000;
+      console.log(`💰 [extractSupply] Found: ${millionMatch[1]} million = ${value.toLocaleString()} tokens`);
+      return value;
+    }
+    
+    // Pattern 2: Explicit "X thousand" or "X K"
+    const thousandMatch = lowerText.match(/(\d+(?:\.\d+)?)\s*(?:thousand|k\b)/i);
+    if (thousandMatch) {
+      const value = parseFloat(thousandMatch[1]) * 1000;
+      console.log(`💰 [extractSupply] Found: ${thousandMatch[1]} thousand = ${value.toLocaleString()} tokens`);
+      return value;
+    }
+    
+    // Pattern 3: Large raw numbers (> 1000) after supply keywords
+    const supplyKeywords = ['supply', 'have', 'holding', 'own', 'tokens'];
+    for (const keyword of supplyKeywords) {
+      const pattern = new RegExp(`${keyword}[:\\s]+([\\d,]+)`, 'i');
+      const match = text.match(pattern);
+      if (match) {
+        const rawValue = match[1].replace(/,/g, '');
+        const value = parseFloat(rawValue);
+        if (!isNaN(value) && value > 0) {
+          console.log(`💰 [extractSupply] Found: ${value.toLocaleString()} tokens after "${keyword}"`);
+          return value;
+        }
+      }
+    }
+    
+    // Fallback: Try generic number extraction
+    const genericSupply = this.extractNumber(text, supplyKeywords, undefined);
+    if (genericSupply) {
+      // If number is less than 1000, assume it's in millions
+      const value = genericSupply < 1000 ? genericSupply * 1000000 : genericSupply;
+      console.log(`💰 [extractSupply] Fallback: ${genericSupply} → ${value.toLocaleString()} tokens`);
+      return value;
+    }
+    
+    return undefined;
   }
 
   /**

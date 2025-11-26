@@ -1015,8 +1015,12 @@ export function createCustomStrategy(config: {
       sellAmountTokens: config.sellAmountTokens,
       sizingRule: config.sizingRule,
       side: config.side,
-      tokenAddress: config.tokenAddress
+      tokenAddress: config.tokenAddress,
+      supply: config.supply  // CRITICAL: Log supply value
     });
+    
+    console.log(`💰💰💰 [createCustomStrategy] Supply value being passed to createReactiveMirrorStrategy: ${config.supply}`);
+    
     return createReactiveMirrorStrategy({
       id: config.id,
       description: config.description,
@@ -1564,8 +1568,12 @@ export function createReactiveMirrorStrategy(config: {
         trigger: config.trigger,
         side: config.side,
         sizingRule: config.sizingRule,
-        tokenAddress: config.tokenAddress
-      }
+        tokenAddress: config.tokenAddress,
+        supply: config.supply // CRITICAL: Add supply to config
+      },
+      supply: config.supply, // Pass supply through to variables for paper trading initialization
+      initialSupply: config.supply, // Also store as initialSupply for compatibility
+      initialTokenBalance: config.supply // CRITICAL: Also store as initialTokenBalance
     }
   );
 
@@ -2334,7 +2342,7 @@ export function createReactiveMirrorStrategy(config: {
 
   console.log(`✅ [createReactiveMirrorStrategy] Strategy created with ${steps.length} steps`);
 
-  // CRITICAL FIX: Attach tokenAddress to strategy object so it can be used for WebSocket subscription
+  // CRITICAL FIX: Attach tokenAddress and supply to strategy object
   const builtStrategy = strategyBuilder.getStrategy(config.id)!;
 
   // Validate and attach tokenAddress
@@ -2345,7 +2353,16 @@ export function createReactiveMirrorStrategy(config: {
   }
 
   (builtStrategy as any).tokenAddress = config.tokenAddress;
+  
+  // CRITICAL: Attach config with supply so StrategyExecutionManager can access it
+  (builtStrategy as any).config = {
+    ...config,
+    supply: config.supply,
+    initialTokenBalance: config.supply
+  };
+  
   console.log(`✅ [createReactiveMirrorStrategy] Attached tokenAddress to strategy: ${config.tokenAddress}`);
+  console.log(`💰💰💰 [createReactiveMirrorStrategy] Attached config.supply to strategy: ${config.supply?.toLocaleString() || 'undefined'}`);
 
   return builtStrategy;
 }

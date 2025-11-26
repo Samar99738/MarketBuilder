@@ -2057,11 +2057,25 @@ Transaction ID: \`${data.transaction}\`
         config: session.currentStrategy.config,
         fullStrategy: session.currentStrategy
       });
+      
+      // CRITICAL DEBUG: Log supply value before creating strategy
+      console.log(`💰💰💰 [EXECUTE] Supply debug BEFORE createStrategyFromTemplate:`, {
+        'config.supply': session.currentStrategy.config.supply,
+        'config keys': Object.keys(session.currentStrategy.config)
+      });
 
       const strategy = createStrategyFromTemplate(
         session.currentStrategy.template,
         session.currentStrategy.config
       );
+      
+      // CRITICAL DEBUG: Log strategy variables after creation
+      console.log(`💰💰💰 [EXECUTE] Supply debug AFTER createStrategyFromTemplate:`, {
+        'strategy.variables.supply': (strategy.variables as any)?.supply,
+        'strategy.config': (strategy as any).config,
+        'strategy.initialTokenBalance': (strategy as any).initialTokenBalance,
+        'strategy.variables keys': strategy.variables ? Object.keys(strategy.variables) : 'undefined'
+      });
 
       console.log(` [EXECUTE] Strategy created:`, {
         id: strategy.id,

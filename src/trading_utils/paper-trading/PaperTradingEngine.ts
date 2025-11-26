@@ -178,6 +178,16 @@ export class PaperTradingEngine {
       throw new Error(`tokenAddress is required for paper trading session creation. Received: ${tokenAddress}`);
     }
     
+    // For sell strategies that start with tokens, initialize virtual position
+    if (initialTokenBalance && initialTokenBalance > 0 && tokenAddress) {
+      console.log(`\n💰 ========== INITIAL TOKEN POSITION SETUP ==========`);
+      console.log(`💰 Token Address: ${tokenAddress}`);
+      console.log(`💰 Initial Balance: ${initialTokenBalance.toLocaleString()} tokens`);
+      console.log(`💰 Source: User-specified supply from strategy config`);
+      console.log(`💰 Session ID: ${sessionId}`);
+      console.log(`💰 ==================================================\n`);
+    }
+    
     console.log(`✅ [PaperTradingEngine] Token address validated: ${tokenAddress} (length: ${tokenAddress.length})`);
     
     // Auto-initialize position for SELL strategies (reactive mirror strategies)
@@ -535,6 +545,14 @@ export class PaperTradingEngine {
           timestamp: Date.now(),
           tradeId: trade.id,
           tradeType: 'buy',
+          
+          // TOP-LEVEL PROPERTIES for frontend compatibility
+          balanceSOL: balanceAfter.sol,
+          balanceUSDC: balanceAfter.usdc,
+          balanceTokens: balanceAfter.tokens,
+          totalValueUSD: balanceAfter.totalValueUSD,
+          totalPnLUSD: state.metrics.totalPnLUSD || 0,
+          roi: state.metrics.roi || 0,
           
           // Before/After snapshots with millisecond precision
           before: {
@@ -1485,45 +1503,45 @@ export class PaperTradingEngine {
           };
         }
         
-        // CRITICAL FIX: Use actual calculated mirror amount for auto-initialization
-        // Priority: 1) User config initialTokenBalance 2) Calculated mirror amount (actualTokenAmount) 3) Config supply 4) Default 1M
-        
-        // Get user-specified initial balance from config
-        const userSpecifiedAmount = (state.config as any).initialTokenBalance;
-        
-        // Get the actual amount being sold (this is the calculated mirror amount)
-        const calculatedMirrorAmount = actualTokenAmount > 0 && actualTokenAmount !== -1 
+        // CRITICAL FIX: Dynamic initial balance with intelligent priority
+        // Priority: 1) config.supply 2) initialTokenBalance 3) initialSupply 4) Detected mirror amount 5) Default 1M
+        const configSupply = (state.config as any).supply;
+        const initialTokenBalance = (state.config as any).initialTokenBalance;
+        const initialSupply = (state.config as any).initialSupply;
+        const detectedMirrorAmount = actualTokenAmount > 0 && actualTokenAmount !== -1 
           ? actualTokenAmount 
           : null;
-        
-        // Get config supply as fallback
-        const configSupply = (state.config as any).initialSupply;
-        
+
         let autoInitTokens: number;
         let initSource: string;
-        
-        if (userSpecifiedAmount && userSpecifiedAmount > 0) {
-          // Priority 1: User explicitly specified initial balance
-          autoInitTokens = userSpecifiedAmount;
-          initSource = `user-specified (${autoInitTokens.toLocaleString()})`;
-        } else if (calculatedMirrorAmount && calculatedMirrorAmount >= 1000) {
-          // Priority 2: Use calculated mirror amount (the amount strategy wants to sell)
-          // Add 20% buffer to ensure we have enough tokens for the sell
-          autoInitTokens = Math.ceil(calculatedMirrorAmount * 1.2);
-          initSource = `calculated mirror (${calculatedMirrorAmount.toLocaleString()} + 20% buffer)`;
-        } else if (configSupply && configSupply > 0) {
-          // Priority 3: Use config supply
-          autoInitTokens = configSupply;
-          initSource = `config supply (${autoInitTokens.toLocaleString()})`;
+
+        if (configSupply && configSupply > 0) {
+          // Priority 1: Use config.supply (from parsed strategy)
+          autoInitTokens = parseFloat(configSupply.toString());
+          initSource = `config.supply (${autoInitTokens.toLocaleString()})`;
+        } else if (initialTokenBalance && initialTokenBalance > 0) {
+          // Priority 2: Use initialTokenBalance
+          autoInitTokens = parseFloat(initialTokenBalance.toString());
+          initSource = `initialTokenBalance (${autoInitTokens.toLocaleString()})`;
+        } else if (initialSupply && initialSupply > 0) {
+          // Priority 3: Use initialSupply
+          autoInitTokens = parseFloat(initialSupply.toString());
+          initSource = `initialSupply (${autoInitTokens.toLocaleString()})`;
+        } else if (detectedMirrorAmount && detectedMirrorAmount >= 1000) {
+          // Priority 4: Calculate from detected mirror amount
+          autoInitTokens = Math.ceil(detectedMirrorAmount * 50);
+          initSource = `calculated from mirror (${detectedMirrorAmount.toLocaleString()} x 50)`;
         } else {
-          // Priority 4: Only fallback to 1M if no other option
+          // Priority 5: Absolute last fallback
           autoInitTokens = 1000000;
           initSource = 'default fallback (1M)';
         }
-        
-        console.log(`💰 [AUTO-INIT] Initializing position: ${autoInitTokens.toLocaleString()} tokens`);
-        console.log(`💰 [AUTO-INIT] Source: ${initSource}`);
-        console.log(`💰 [AUTO-INIT] Context: userConfig=${userSpecifiedAmount || 'none'}, mirrorAmount=${calculatedMirrorAmount || 'none'}, supply=${configSupply || 'none'}`);
+
+        console.log(`\n💰 ========== AUTO-INIT TOKEN BALANCE ==========`);
+        console.log(`💰 Final Balance: ${autoInitTokens.toLocaleString()} tokens`);
+        console.log(`💰 Source: ${initSource}`);
+        console.log(`💰 Token: ${tokenAddress.substring(0, 8)}...`);
+        console.log(`💰 ============================================\n`);
 
       const marketPrice = marketData.price; // Real token price in SOL
       const priceUSD = marketData.priceUSD; // Real token price in USD
@@ -1750,6 +1768,14 @@ export class PaperTradingEngine {
           timestamp: Date.now(),
           tradeId: trade.id,
           tradeType: 'sell',
+          
+          // TOP-LEVEL PROPERTIES for frontend compatibility
+          balanceSOL: balanceAfter.sol,
+          balanceUSDC: balanceAfter.usdc,
+          balanceTokens: balanceAfter.tokens,
+          totalValueUSD: balanceAfter.totalValueUSD,
+          totalPnLUSD: state.metrics.totalPnLUSD || 0,
+          roi: state.metrics.roi || 0,
           
           // Before/After snapshots with millisecond precision
           before: {
