@@ -256,7 +256,11 @@ export class RealTradeFeedService extends EventEmitter {
         console.log(`🚀 Trade data:`, { type: trade.type, solAmount: trade.solAmount, tokenAmount: trade.tokenAmount });
         
         const normalizedAddress = tokenAddress.toLowerCase();
+        
+        // Emit with timestamp to measure latency
+        const emitStartTime = Date.now();
         this.emit(`trade:${normalizedAddress}`, enhancedTrade);
+        console.log(`🚀 Event emission took: ${Date.now() - emitStartTime}ms`);
         
         const listenerCount = this.listenerCount(`trade:${normalizedAddress}`);
         console.log(`🚀 Event emitted! Listener count: ${listenerCount}`);
@@ -264,11 +268,13 @@ export class RealTradeFeedService extends EventEmitter {
         if (listenerCount === 0) {
           console.error(`⚠️⚠️⚠️ WARNING: NO LISTENERS registered for trade:${normalizedAddress}!`);
           console.error(`⚠️ Strategy may not be subscribed to this token!`);
+          console.error(`⚠️ All registered events:`, this.eventNames());
         }
 
         this.emit('real_trade', enhancedTrade);
       } else {
         console.log(`[Filter] ${trade.type.toUpperCase()} filtered out (UI only, not triggering strategy)`);
+        console.log(`[Filter] Filter for this token:`, this.strategyFilters.get(tokenAddress.toLowerCase()));
       }
 
       console.log(`✅ [RealTradeFeedService] Trade fully processed`);

@@ -828,7 +828,7 @@ export class StrategyParser {
    * Extract token supply from text with intelligent unit parsing
    * Handles: "15 million", "15M", "15000000", etc.
    */
-  private extractSupply(text: string): number | undefined {
+  public extractSupply(text: string): number | undefined {
     const lowerText = text.toLowerCase();
     
     // Pattern 1: Explicit "X million" or "X M"

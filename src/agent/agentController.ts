@@ -506,11 +506,22 @@ export class AgentController {
         let strategyConfig = strategyValidator.extractStrategyFromResponse(aiResponse.text);
         
         if (strategyConfig) {
+          // CRITICAL FIX: AI might not include supply in JSON, so extract it from user message
+          console.log(`💰💰💰 [AI-FIRST] Checking if supply is in AI config:`, strategyConfig.supply);
+          if (!strategyConfig.supply) {
+            const extractedSupply = strategyParser.extractSupply(userMessage);
+            if (extractedSupply && extractedSupply > 0) {
+              console.log(`💰💰💰 [AI-FIRST] AI didn't include supply, but we extracted from user: ${extractedSupply}`);
+              strategyConfig.supply = extractedSupply;
+            }
+          }
+          
           // AI generated a strategy config - validate it
           const validation = strategyValidator.validateStrategy(strategyConfig);
           
           console.log(' [AI-FIRST] Strategy extracted from AI:', {
             strategyType: strategyConfig.strategyType,
+            supply: strategyConfig.supply,
             isValid: validation.isValid,
             isComplete: validation.isComplete,
             confidence: validation.confidence,
@@ -529,6 +540,7 @@ export class AgentController {
             };
 
             console.log(` [AI-FIRST] Successfully extracted strategy from AI (confidence: ${(validation.confidence * 100).toFixed(1)}%)`);
+            console.log(`💰💰💰 [AI-FIRST] Final config.supply: ${strategyConfig.supply}`);
             
             // If incomplete, AI should have already asked for missing params
             if (!validation.isComplete) {
