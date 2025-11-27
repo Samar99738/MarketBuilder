@@ -12,6 +12,7 @@ import {
 } from './types';
 import { marketDataProvider } from './MarketDataProvider';
 import { awsLogger } from '../../aws/logger';
+import { roiPnlDebugger } from '../../utils/roi-pnl-debugger';
 
 export class PaperTradingPortfolio {
   private portfolio: PaperPortfolio;
@@ -229,19 +230,46 @@ export class PaperTradingPortfolio {
     await this.refreshPositions();
 
     const solPrice = await marketDataProvider.fetchSolPrice();
-    const buyTrades = this.trades.filter(t => t.type === 'buy');
-    const sellTrades = this.trades.filter(t => t.type === 'sell');
+    // Filter out auto-init trades
+    const realTrades = this.trades.filter(t => 
+      t.trigger !== 'auto_init_for_sell_strategy' && 
+      t.trigger !== 'initial_position'
+    );
+    
+    const buyTrades = realTrades.filter(t => t.type === 'buy');
+    const sellTrades = realTrades.filter(t => t.type === 'sell');
 
-    // Calculate realized P&L
+    // Calculate realized P&L (ONLY from real sell trades, not auto-init)
     const realizedPnL = sellTrades.reduce((sum, trade) => sum + (trade.realizedPnL || 0), 0);
     const realizedPnLUSD = realizedPnL * solPrice;
+    
+    console.log('💰 [P&L CALCULATION] Trade Breakdown:', {
+      totalTrades: this.trades.length,
+      realTrades: realTrades.length,
+      buyTrades: buyTrades.length,
+      sellTrades: sellTrades.length,
+      realizedPnL: realizedPnL.toFixed(6),
+      realizedPnLUSD: realizedPnLUSD.toFixed(2)
+    });
 
     // Calculate unrealized P&L
+    // CRITICAL FIX: If no real trades, unrealized P&L should be 0 (not counting auto-init positions)
     let unrealizedPnL = 0;
-    for (const position of this.portfolio.positions.values()) {
-      unrealizedPnL += position.unrealizedPnL;
+    
+    if (realTrades.length > 0) {
+      for (const position of this.portfolio.positions.values()) {
+        unrealizedPnL += position.unrealizedPnL;
+      }
     }
+    
     const unrealizedPnLUSD = unrealizedPnL * solPrice;
+    
+    console.log('📈 [Unrealized P&L]:', {
+      hasRealTrades: realTrades.length > 0,
+      openPositions: this.portfolio.positions.size,
+      unrealizedPnL: unrealizedPnL.toFixed(6),
+      unrealizedPnLUSD: unrealizedPnLUSD.toFixed(2)
+    });
 
     // Total P&L (USD values already converted above)
     const totalPnL = realizedPnL + unrealizedPnL;
@@ -266,7 +294,8 @@ export class PaperTradingPortfolio {
     const winRate = completedSellTrades > 0 ? (winningTrades / completedSellTrades) * 100 : 0;
 
     console.log('📊 [Portfolio Metrics] Win/Loss Analysis:', {
-      totalTrades: this.trades.length,
+      totalTrades: realTrades.length,
+      allTrades: this.trades.length,
       buyTrades: buyTrades.length,
       sellTrades: sellTrades.length,
       profitableTrades: profitableTrades.length,
@@ -322,10 +351,32 @@ export class PaperTradingPortfolio {
     const totalPnLPercentage = (totalPnLUSD / initialValueUSD) * 100;
 
     // ROI = (Current Value - Initial Investment) / Initial Investment * 100
-    // This shows percentage gain/loss on initial capital
+    // CRITICAL FIX: ROI should be 0% if no real trades executed yet
     const initialInvestment = this.portfolio.initialBalanceUSD;
     const currentValue = this.portfolio.totalValueUSD;
-    const roi = initialInvestment > 0 ? ((currentValue - initialInvestment) / initialInvestment) * 100 : 0;
+    
+    let roi = 0;
+    let safeInitialInvestment = initialInvestment > 0 ? initialInvestment : (this.portfolio.initialBalanceSOL * solPrice);
+    
+    // Only calculate ROI if there are REAL trades (not just auto-init)
+    if (realTrades.length > 0) {
+      roi = safeInitialInvestment > 0 ? ((currentValue - safeInitialInvestment) / safeInitialInvestment) * 100 : 0;
+    } else {
+      roi = 0; // No real trades = 0% ROI
+      console.log('ℹ️ [ROI] No real trades yet, ROI = 0%');
+    }
+    
+    console.log('📊 [ROI CALCULATION] Details:', {
+      totalTrades: this.trades.length,
+      realTrades: realTrades.length,
+      autoInitTrades: this.trades.length - realTrades.length,
+      initialInvestment: initialInvestment.toFixed(2),
+      safeInitialInvestment: safeInitialInvestment.toFixed(2),
+      currentValue: currentValue.toFixed(2),
+      difference: (currentValue - safeInitialInvestment).toFixed(2),
+      roi: roi.toFixed(2) + '%',
+      totalPnLUSD: totalPnLUSD.toFixed(2)
+    });
 
     // Time-based metrics
     const duration = Date.now() - this.startTime;
@@ -351,8 +402,8 @@ export class PaperTradingPortfolio {
     }
 
     const metrics: PaperTradingMetrics = {
-      // Overall
-      totalTrades: this.trades.length,
+      // Overall (excluding auto-init trades)
+      totalTrades: realTrades.length,
       buyTrades: buyTrades.length,
       sellTrades: sellTrades.length,
 
@@ -405,6 +456,29 @@ export class PaperTradingPortfolio {
       strategyId,
       strategyName,
     };
+    
+    // Record snapshot for debugging
+    roiPnlDebugger.recordSnapshot({
+      timestamp: Date.now(),
+      source: 'PaperTradingPortfolio.calculateMetrics',
+      balanceSOL: this.portfolio.balanceSOL,
+      balanceUSDC: this.portfolio.balanceUSDC,
+      balanceTokens: this.portfolio.balanceTokens,
+      initialBalanceSOL: this.portfolio.initialBalanceSOL,
+      initialBalanceUSD: safeInitialInvestment,
+      currentTotalValueUSD: currentValue,
+      realizedPnLUSD,
+      unrealizedPnLUSD,
+      totalPnLUSD,
+      totalFeesUSD,
+      roi,
+      roiCalculationMethod: `((${currentValue.toFixed(2)} - ${safeInitialInvestment.toFixed(2)}) / ${safeInitialInvestment.toFixed(2)}) * 100`,
+      solPriceUSD: solPrice
+    });
+    
+    // Validate calculations
+    roiPnlDebugger.validateROI(safeInitialInvestment, currentValue, roi, 'Portfolio');
+    roiPnlDebugger.validatePnL(realizedPnLUSD, unrealizedPnLUSD, totalPnLUSD, 'Portfolio');
 
     return metrics;
   }

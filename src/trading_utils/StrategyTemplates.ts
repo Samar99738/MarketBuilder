@@ -2352,19 +2352,58 @@ export function createReactiveMirrorStrategy(config: {
     throw new Error('tokenAddress is required for reactive mirror strategies');
   }
 
+  /**
+   * CRITICAL FIX: Attach tokenAddress and supply to all possible locaction
+   * This ensures StrategyExecutionManager finds it regardless of which prperty it checks first
+   */
+  // Location 1: Top level property (Checked FIRST by strategyExecutionManager)
+  (builtStrategy as any).initialTokenBalance = config.supply || 0;
+
+  // Location 2: Token Address (always required)
   (builtStrategy as any).tokenAddress = config.tokenAddress;
-  
-  // CRITICAL: Attach config with supply so StrategyExecutionManager can access it
+
+  // Location 3: Config object (checked SECOND by StrategyExecutioManager)
   (builtStrategy as any).config = {
     ...config,
     supply: config.supply,
-    initialTokenBalance: config.supply
+    initialTokenBalance: config.supply,
+    tokenAddress: config.tokenAddress,
   };
-  
-  console.log(`✅ [createReactiveMirrorStrategy] Attached tokenAddress to strategy: ${config.tokenAddress}`);
-  console.log(`💰💰💰 [createReactiveMirrorStrategy] Attached config.supply to strategy: ${config.supply?.toLocaleString() || 'undefined'}`);
+  // Location 4: Variables object (checked THIRD by StrategyExecutionManager)
+  if (!(builtStrategy.variables as any)) {
+    (builtStrategy as any).variables = {};
+  }
+  (builtStrategy.variables as any).supply = config.supply;
+  (builtStrategy.variables as any).initialSupply = config.supply;
+  (builtStrategy.variables as any).initialTokenBalance = config.supply;
+  (builtStrategy.variables as any).tokenAddress = config.tokenAddress;
 
-  return builtStrategy;
+  // log confirmation
+  console.log(`✅✅✅ [createReactiveMirrorStrategy] Supply attached to ALL locations:`, {
+  'strategy.initialTokenBalance': (builtStrategy as any).initialTokenBalance,
+  'strategy.config.supply': (builtStrategy as any).config.supply,
+  'strategy.config.initialTokenBalance': (builtStrategy as any).config.initialTokenBalance,
+  'strategy.variables.supply': (builtStrategy.variables as any)?.supply,
+  'strategy.variables.initialSupply': (builtStrategy.variables as any)?.initialSupply,
+  'strategy.variables.initialTokenBalance': (builtStrategy.variables as any)?.initialTokenBalance,
+});
+
+console.log(`[createReactiveMirrorStrategy] Token address: ${config.tokenAddress}`);
+
+return builtStrategy;
+
+  // (builtStrategy as any).tokenAddress = config.tokenAddress;
+  
+  // // CRITICAL: Attach config with supply so StrategyExecutionManager can access it
+  // (builtStrategy as any).config = {
+  //   ...config,
+  //   supply: config.supply,
+  //   initialTokenBalance: config.supply
+  // };
+  
+  // console.log(`✅ [createReactiveMirrorStrategy] Attached tokenAddress to strategy: ${config.tokenAddress}`);
+  // console.log(`💰💰💰 [createReactiveMirrorStrategy] Attached config.supply to strategy: ${config.supply?.toLocaleString() || 'undefined'}`);
+
 }
 
 /**
@@ -2384,6 +2423,7 @@ export function createContrarianVolatilityStrategy(config: {
   buyTriggerPercentage: number; // e.g., 15 = buy when price drops 15%
   buyTriggerTimeframeMinutes: number; // e.g., 5 = within 5 minutes
   buyAmountSOL: number; // e.g., 0.001 SOL
+  supply?: number
 }): Strategy {
   console.log(`🎯 [createContrarianVolatilityStrategy] Creating volatility strategy for ${config.tokenAddress}`);
 
@@ -2647,7 +2687,28 @@ export function createContrarianVolatilityStrategy(config: {
   }
 
   console.log(`✅ [createContrarianVolatilityStrategy] Strategy created with ${steps.length} steps`);
-  return strategyBuilder.getStrategy(config.id)!;
+  console.log(`✅ [createContrarianVolatilityStrategy] Strategy created with ${steps.length} steps`);
+
+// ✅ NEW: Attach supply if provided (for sell-side strategies)
+if (config.supply && config.supply > 0) {
+  console.log(`💰 [createContrarianVolatilityStrategy] Attaching supply: ${config.supply.toLocaleString()}`);
+  
+  const builtStrategy = strategyBuilder.getStrategy(config.id)!;
+
+  (builtStrategy as any).initialTokenBalance = config.supply;
+  (builtStrategy as any).config = { ...config };
+  
+  if (!(builtStrategy.variables as any)) {
+    (builtStrategy as any).variables = {};
+  }
+  (builtStrategy.variables as any).supply = config.supply;
+  (builtStrategy.variables as any).initialSupply = config.supply;
+  (builtStrategy.variables as any).initialTokenBalance = config.supply;
+  
+  console.log(`✅ [createContrarianVolatilityStrategy] Supply attached to all locations`);
+}
+
+return strategyBuilder.getStrategy(config.id)!;
 }
 
 /**

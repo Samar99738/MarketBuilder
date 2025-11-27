@@ -82,15 +82,15 @@ export class PaperTradingEngine {
         // Skip periodic updates if no token position exists
         const positions = Array.from((state.portfolio as any).positions?.values() || []);
         if (positions.length === 0) continue;
-        
+
         const firstPosition = positions[0] as any;
         const tokenAddress = firstPosition?.tokenAddress;
-        
+
         if (!tokenAddress || tokenAddress.length !== 44) {
           console.warn(`[PaperTradingEngine] Invalid token address in position: ${tokenAddress}`);
           continue;
         }
-        
+
         // Get current market price for the token
         const currentPrice = await marketDataProvider.fetchTokenPrice(tokenAddress);
 
@@ -105,6 +105,12 @@ export class PaperTradingEngine {
           const unrealizedPnL = metrics.totalValueUSD - (metrics.initialBalanceSOL * currentPrice.priceUSD);
           const unrealizedPnLUSD = unrealizedPnL;
 
+          // CRITICAL: Recalculate ROI consistently
+          const initialInvestmentUSD = state.config.initialBalanceSOL * currentPrice.priceUSD + state.config.initialBalanceUSDC;
+          const consistentROI = initialInvestmentUSD > 0 
+            ? ((metrics.totalValueUSD - initialInvestmentUSD) / initialInvestmentUSD) * 100 
+            : 0;
+
           const simulationData = {
             sessionId,
             type: 'portfolio_update',
@@ -116,7 +122,7 @@ export class PaperTradingEngine {
               totalValueUSD: metrics.totalValueUSD,
               totalPnL: metrics.totalPnL,
               totalPnLUSD: metrics.totalPnLUSD,
-              roi: metrics.roi,
+              roi: consistentROI,
               unrealizedPnL: unrealizedPnL,
               unrealizedPnLUSD: unrealizedPnLUSD
             },
@@ -159,55 +165,93 @@ export class PaperTradingEngine {
     }
   ): Promise<PaperTradingState> {
     const mergedConfig = { ...this.defaultConfig, ...config, enabled: true };
-    
+
     const portfolio = new PaperTradingPortfolio(
       mergedConfig.initialBalanceSOL,
       mergedConfig.initialBalanceUSDC
     );
 
-    // FIX #6: Initialize positions for sell strategies at session creation (not during first sell)
-    const initialTokenBalance = (config as any)?.initialBalanceTokens || 0;
-    const tokenAddress = (config as any)?.tokenAddress; // FIX #5: No ENV_CONFIG fallback
-    const strategySide = (config as any)?.strategySide || 'buy'; // 'buy' or 'sell'
-    
-    // Validate tokenAddress is provided (required for all strategies)
-    // Solana addresses are typically 43-44 characters (base58 encoded 32-byte pubkeys)
+    // Extract values from config WITHOUT fallbacks
+    const initialTokenBalance = (config as any)?.initialBalanceTokens
+      || (config as any)?.initialTokenBalance
+      || 0;
+
+    const tokenAddress = (config as any)?.tokenAddress;
+    const strategySide = (config as any)?.strategySide || 'buy';
+
+    // Log what we received
+    console.log(`\n📥📥📥 [PaperTradingEngine.createSession] === RECEIVED CONFIG ===`);
+    console.log(`📥 Initial Token Balance: ${initialTokenBalance.toLocaleString()}`);
+    console.log(`📥 Token Address: ${tokenAddress}`);
+    console.log(`📥 Strategy Side: ${strategySide}`);
+    console.log(`📥📥📥 === END RECEIVED CONFIG ===\n`);
+
+    // Validate tokenAddress
     if (!tokenAddress || typeof tokenAddress !== 'string' || tokenAddress.length < 32 || tokenAddress.length > 44) {
-      console.error(`❌ [PaperTradingEngine] Invalid or missing tokenAddress: ${tokenAddress}`);
-      console.error(`   Expected: 32-44 character Solana address, Got: ${typeof tokenAddress} with length ${tokenAddress?.length || 0}`);
-      throw new Error(`tokenAddress is required for paper trading session creation. Received: ${tokenAddress}`);
+      console.error(`❌ [PaperTradingEngine] Invalid tokenAddress: ${tokenAddress}`);
+      throw new Error(`tokenAddress is required. Received: ${tokenAddress}`);
     }
-    
-    // For sell strategies that start with tokens, initialize virtual position
-    if (initialTokenBalance && initialTokenBalance > 0 && tokenAddress) {
-      console.log(`\n💰 ========== INITIAL TOKEN POSITION SETUP ==========`);
-      console.log(`💰 Token Address: ${tokenAddress}`);
-      console.log(`💰 Initial Balance: ${initialTokenBalance.toLocaleString()} tokens`);
-      console.log(`💰 Source: User-specified supply from strategy config`);
-      console.log(`💰 Session ID: ${sessionId}`);
-      console.log(`💰 ==================================================\n`);
+
+    // Validate SELL strategies have token balance
+    if (strategySide === 'sell' && (!initialTokenBalance || initialTokenBalance <= 0)) {
+      console.error(`❌ [PaperTradingEngine] SELL strategy requires initial token balance`);
+      console.error(`❌ Received: ${initialTokenBalance}`);
+      throw new Error(`Cannot create SELL strategy without initial token balance. Received: ${initialTokenBalance}`);
     }
-    
-    console.log(`✅ [PaperTradingEngine] Token address validated: ${tokenAddress} (length: ${tokenAddress.length})`);
-    
-    // Auto-initialize position for SELL strategies (reactive mirror strategies)
-    const shouldAutoInitForSellStrategy = initialTokenBalance === 0 && 
-                                          strategySide === 'sell' && 
-                                          tokenAddress;
-    
-    const configuredSupply = (config as any)?.initialSupply || 1000000;
-    const effectiveTokenBalance = shouldAutoInitForSellStrategy ? configuredSupply : initialTokenBalance;
-    
+
+    // NO FALLBACK: Use exact value provided
+    const effectiveTokenBalance = initialTokenBalance;
+
+    // Define shouldAutoInitForSellStrategy for log usage
+    const shouldAutoInitForSellStrategy = initialTokenBalance === 0 &&
+      strategySide === 'sell' &&
+      !!tokenAddress;
+
+    console.log(`💰💰💰 [PaperTradingEngine] Token Balance: ${effectiveTokenBalance.toLocaleString()}`);
+
+    // // FIX #6: Initialize positions for sell strategies at session creation (not during first sell)
+    // const initialTokenBalance = (config as any)?.initialBalanceTokens || 0;
+    // const tokenAddress = (config as any)?.tokenAddress; // FIX #5: No ENV_CONFIG fallback
+    // const strategySide = (config as any)?.strategySide || 'buy'; // 'buy' or 'sell'
+
+    // // Validate tokenAddress is provided (required for all strategies)
+    // // Solana addresses are typically 43-44 characters (base58 encoded 32-byte pubkeys)
+    // if (!tokenAddress || typeof tokenAddress !== 'string' || tokenAddress.length < 32 || tokenAddress.length > 44) {
+    //   console.error(`❌ [PaperTradingEngine] Invalid or missing tokenAddress: ${tokenAddress}`);
+    //   console.error(`   Expected: 32-44 character Solana address, Got: ${typeof tokenAddress} with length ${tokenAddress?.length || 0}`);
+    //   throw new Error(`tokenAddress is required for paper trading session creation. Received: ${tokenAddress}`);
+    // }
+
+    // // For sell strategies that start with tokens, initialize virtual position
+    // if (initialTokenBalance && initialTokenBalance > 0 && tokenAddress) {
+    //   console.log(`\n💰 ========== INITIAL TOKEN POSITION SETUP ==========`);
+    //   console.log(`💰 Token Address: ${tokenAddress}`);
+    //   console.log(`💰 Initial Balance: ${initialTokenBalance.toLocaleString()} tokens`);
+    //   console.log(`💰 Source: User-specified supply from strategy config`);
+    //   console.log(`💰 Session ID: ${sessionId}`);
+    //   console.log(`💰 ==================================================\n`);
+    // }
+
+    // console.log(`✅ [PaperTradingEngine] Token address validated: ${tokenAddress} (length: ${tokenAddress.length})`);
+
+    // // Auto-initialize position for SELL strategies (reactive mirror strategies)
+    // const shouldAutoInitForSellStrategy = initialTokenBalance === 0 && 
+    //                                       strategySide === 'sell' && 
+    //                                       tokenAddress;
+
+    // const configuredSupply = (config as any)?.initialSupply || 1000000;
+    // const effectiveTokenBalance = shouldAutoInitForSellStrategy ? configuredSupply : initialTokenBalance;
+
     if (effectiveTokenBalance > 0) {
       console.log(`💰 [PaperTradingEngine] Initializing position: ${effectiveTokenBalance} tokens${shouldAutoInitForSellStrategy ? ' (auto-init for sell strategy)' : ''}`);
       const now = Date.now();
-      
+
       // PRODUCTION: Fetch REAL current market price - NO FALLBACKS ALLOWED
       let marketPrice: number;
       let priceUSD: number;
       let solPriceUSD: number;
       let tokenSymbol: string;
-      
+
       try {
         const marketData = await marketDataProvider.fetchTokenPrice(tokenAddress);
         if (!marketData) {
@@ -216,7 +260,7 @@ export class PaperTradingEngine {
           console.error(errorMsg);
           throw new Error(`Market data unavailable for ${tokenAddress}. Please try again when market APIs are responsive.`);
         }
-        
+
         marketPrice = marketData.price; // Real token price in SOL
         priceUSD = marketData.priceUSD; // Real token price in USD
         solPriceUSD = marketData.solPrice; // Real SOL price in USD
@@ -226,26 +270,26 @@ export class PaperTradingEngine {
         console.error(`❌ [PaperTradingEngine] FATAL: Market price fetch failed:`, error);
         throw new Error(`Cannot create session without real market data: ${error instanceof Error ? error.message : String(error)}`);
       }
-      
+
       // PRODUCTION SAFETY: Validate prices are real and not suspiciously low
       if (marketPrice < 0.000000001 || priceUSD < 0.0000001) {
         const errorMsg = `❌ PRODUCTION SAFETY: Detected suspiciously low price (${priceUSD} USD, ${marketPrice} SOL). Refusing to use potentially fake data.`;
         console.error(errorMsg);
         throw new Error(`Invalid market data: Price too low (${priceUSD} USD). This may be a data error. Please verify token address is correct.`);
       }
-      
+
       if (!marketPrice || !priceUSD || !solPriceUSD || isNaN(marketPrice) || isNaN(priceUSD) || isNaN(solPriceUSD)) {
         const errorMsg = `❌ PRODUCTION SAFETY: Invalid price data detected (marketPrice: ${marketPrice}, priceUSD: ${priceUSD}, solPriceUSD: ${solPriceUSD})`;
         console.error(errorMsg);
         throw new Error(`Invalid market data: Prices contain NaN or null values. Cannot proceed with invalid data.`);
       }
-      
+
       console.log(`✅ [PRODUCTION] Price validation passed: $${priceUSD} USD (${marketPrice} SOL, SOL=$${solPriceUSD})`);
-      
+
       // Calculate actual cost basis based on REAL current price
       const costBasisSOL = effectiveTokenBalance * marketPrice; // Real SOL value
       const costBasisUSD = effectiveTokenBalance * priceUSD; // Real USD value
-      
+
       // Create a mock buy trade to initialize the position properly
       const mockTrade: PaperTrade = {
         id: uuidv4(),
@@ -274,10 +318,10 @@ export class PaperTradingEngine {
         realizedPnL: 0,
         trigger: 'initial_position',
       };
-      
+
       // Add the mock trade to initialize the position
       portfolio.addTrade(mockTrade);
-      
+
       console.log(`💰 [PaperTradingEngine] Initialized session with ${initialTokenBalance} tokens for ${tokenAddress}`);
       console.log(`💵 Initial position value: ${costBasisSOL.toFixed(6)} SOL = $${costBasisUSD.toFixed(2)} USD`);
     }
@@ -315,7 +359,7 @@ export class PaperTradingEngine {
       const firstPosition = positions[0] as any;
       const tokenSymbol = firstPosition?.tokenSymbol || 'USDC';
       const tokenBalance = firstPosition?.amount || 0;
-      
+
       const initialBalanceEvent = {
         sessionId,
         balanceSOL: mergedConfig.initialBalanceSOL,
@@ -360,7 +404,7 @@ export class PaperTradingEngine {
     trigger?: string
   ): Promise<OrderExecutionResult> {
     const state = this.sessions.get(sessionId);
-    
+
     if (!state || !state.isActive) {
       return {
         success: false,
@@ -390,7 +434,7 @@ export class PaperTradingEngine {
       let marketData = null;
       let lastError = '';
       const maxRetries = 5; // Increased from 3 to 5 for better reliability
-      
+
       for (let attempt = 1; attempt <= maxRetries; attempt++) {
         try {
           marketData = await marketDataProvider.fetchTokenPrice(tokenAddress);
@@ -408,14 +452,14 @@ export class PaperTradingEngine {
             const baseDelay = 1000 * Math.pow(1.5, attempt); // 1.5s, 2.25s, 3.375s, 5.06s
             const jitter = Math.random() * 500; // 0-500ms random delay
             const delay = baseDelay + jitter;
-            console.log(`⏳ [Market Data] Retrying in ${(delay/1000).toFixed(1)}s...`);
+            console.log(`⏳ [Market Data] Retrying in ${(delay / 1000).toFixed(1)}s...`);
             await new Promise(resolve => setTimeout(resolve, delay));
           }
         }
       }
-      
+
       if (!marketData) {
-        this.log(sessionId, 'error', 'Failed to fetch market data after retries', {tokenAddress, lastError});
+        this.log(sessionId, 'error', 'Failed to fetch market data after retries', { tokenAddress, lastError });
 
         // Emmit error state without changing balnaces or charging fees
         if (this.io) {
@@ -453,7 +497,7 @@ export class PaperTradingEngine {
 
       // Effective SOL after fees
       const effectiveSOL = amountSOL - totalFees;
-      
+
       // Calculate token amount (no additional slippage on token amount)
       const tokensReceived = effectiveSOL / basePrice; // Use base price, not execution price with slippage
 
@@ -522,8 +566,8 @@ export class PaperTradingEngine {
         totalTrades: state.metrics.totalTrades,
         totalFeesUSD: state.metrics.totalFeesUSD,
         duration: state.metrics.duration,
-        executionsPerMin: state.metrics.duration > 0 
-          ? (state.metrics.totalTrades / (state.metrics.duration / 60000)) 
+        executionsPerMin: state.metrics.duration > 0
+          ? (state.metrics.totalTrades / (state.metrics.duration / 60000))
           : 0
       });
 
@@ -539,21 +583,36 @@ export class PaperTradingEngine {
         // ENHANCED: Get token-specific date
         const position = portfolio.getPosition(tokenAddress);
         const tokenSymbol = marketData.tokenSymbol || 'TOKEN';
+        
+        // CRITICAL FIX: Calculate consistent ROI for balance update
+        const initialInvestmentUSD = state.config.initialBalanceSOL * marketData.solPrice + state.config.initialBalanceUSDC;
+        const currentTotalValueUSD = state.metrics.totalValueUSD;
+        const consistentROI = initialInvestmentUSD > 0 
+          ? ((currentTotalValueUSD - initialInvestmentUSD) / initialInvestmentUSD) * 100 
+          : 0;
+        
+        console.log('🔄 [Balance Update] ROI Consistency Check:', {
+          'state.metrics.roi': state.metrics.roi?.toFixed(2),
+          'calculated consistentROI': consistentROI.toFixed(2),
+          'difference': Math.abs((state.metrics.roi || 0) - consistentROI).toFixed(4),
+          initialInvestmentUSD: initialInvestmentUSD.toFixed(2),
+          currentTotalValueUSD: currentTotalValueUSD.toFixed(2)
+        });
 
         const balanceUpdateEvent = {
           sessionId,
           timestamp: Date.now(),
           tradeId: trade.id,
           tradeType: 'buy',
-          
+
           // TOP-LEVEL PROPERTIES for frontend compatibility
           balanceSOL: balanceAfter.sol,
           balanceUSDC: balanceAfter.usdc,
           balanceTokens: balanceAfter.tokens,
           totalValueUSD: balanceAfter.totalValueUSD,
           totalPnLUSD: state.metrics.totalPnLUSD || 0,
-          roi: state.metrics.roi || 0,
-          
+          roi: consistentROI,
+
           // Before/After snapshots with millisecond precision
           before: {
             balanceSOL: balanceBefore.sol,
@@ -567,7 +626,7 @@ export class PaperTradingEngine {
             balanceTokens: balanceAfter.tokens,
             totalValueUSD: balanceAfter.totalValueUSD,
           },
-          
+
           // Deltas with millisecond precision
           deltas: {
             solDelta: balanceAfter.sol - balanceBefore.sol,
@@ -584,7 +643,7 @@ export class PaperTradingEngine {
             balanceBefore: balanceBefore.tokens,
             balanceDelta: balanceAfter.tokens - balanceBefore.tokens,
           },
-          
+
           // Available capital
           availableCapital: {
             sol: balanceAfter.sol,
@@ -592,7 +651,7 @@ export class PaperTradingEngine {
             totalUSD: (balanceAfter.sol * marketData.solPrice) + balanceAfter.usdc,
             marginUsed: 0, // For future margin trading
           },
-          
+
           // Trade execution details
           executionDetails: {
             amountSOL: amountSOL,
@@ -616,7 +675,7 @@ export class PaperTradingEngine {
         };
 
         this.io.emit('paper:balance:update', balanceUpdateEvent);
-        console.log('💰 [Balance Update] SOL: %s → %s, Tokens: %s → %s', 
+        console.log('💰 [Balance Update] SOL: %s → %s, Tokens: %s → %s',
           balanceBefore.sol.toFixed(6), balanceAfter.sol.toFixed(6),
           balanceBefore.tokens.toFixed(2), balanceAfter.tokens.toFixed(2)
         );
@@ -641,18 +700,18 @@ export class PaperTradingEngine {
       if (this.io) {
         const solToUSD = amountSOL * marketData.solPrice;
         const position = portfolio.getPosition(tokenAddress);
-        
+
         // Calculate portfolio allocation
         const totalPortfolioValueUSD = state.metrics.totalValueUSD;
         const positionValueUSD = tokensReceived * marketData.priceUSD;
-        const allocationPercentage = totalPortfolioValueUSD > 0 
-          ? (positionValueUSD / totalPortfolioValueUSD) * 100 
+        const allocationPercentage = totalPortfolioValueUSD > 0
+          ? (positionValueUSD / totalPortfolioValueUSD) * 100
           : 0;
-        
+
         // Calculate trade velocity (trades per minute)
         const sessionDuration = (Date.now() - state.startTime) / 60000; // in minutes
         const tradesPerMinute = sessionDuration > 0 ? state.trades.length / sessionDuration : 0;
-        
+
         // Calculate balance deltas
         const balanceDeltas = {
           solDelta: -amountSOL, // Negative because we're spending SOL
@@ -660,7 +719,7 @@ export class PaperTradingEngine {
           tokenDelta: tokensReceived, // Positive because we received tokens
           totalValueDelta: 0 // No immediate value change on buy
         };
-        
+
         const eventData = {
           sessionId,
           side: 'buy',
@@ -680,7 +739,7 @@ export class PaperTradingEngine {
           executionTimeMs: Date.now() - trade.timestamp, // Execution latency
           tradeId: trade.id,
           totalTrades: state.trades.length,
-          
+
           // Enhanced fee breakdown
           fees: {
             tradingFee: tradingFee,
@@ -691,7 +750,7 @@ export class PaperTradingEngine {
             totalFeesUSD: totalFees * marketData.solPrice,
             feePercentage: (totalFees / amountSOL) * 100
           },
-          
+
           // Slippage impact
           slippage: {
             amount: slippageAmount,
@@ -699,7 +758,7 @@ export class PaperTradingEngine {
             percentage: state.config.slippagePercentage,
             impactOnPrice: (slippageAmount / basePrice) * 100
           },
-          
+
           // Position details
           position: {
             tokenAddress: tokenAddress,
@@ -713,10 +772,10 @@ export class PaperTradingEngine {
             allocationPercentage: allocationPercentage,
             totalPositionSize: (position?.amount || 0) + tokensReceived
           },
-          
+
           // Balance changes
           balanceDeltas: balanceDeltas,
-          
+
           // Current balances after trade
           balances: {
             solBalance: state.portfolio.balanceSOL,
@@ -725,7 +784,7 @@ export class PaperTradingEngine {
             totalValueUSD: state.metrics.totalValueUSD,
             availableCash: state.portfolio.balanceSOL + state.portfolio.balanceUSDC / marketData.solPrice
           },
-          
+
           // Execution details
           execution: {
             orderType: 'market',
@@ -736,20 +795,20 @@ export class PaperTradingEngine {
             priceDeviation: 0, // No deviation for market orders
             fillRate: 100 // Always 100% for paper trading
           },
-          
+
           // Trading velocity
           velocity: {
             tradesPerMinute: tradesPerMinute,
             sessionDuration: sessionDuration,
             averageTradeInterval: sessionDuration > 0 ? sessionDuration / state.trades.length : 0
           },
-          
+
           strategyInfo: {
             strategyId: strategyId,
             strategyName: strategyName,
             trigger: trigger
           },
-          
+
           // Comprehensive metrics
           metrics: {
             totalTrades: state.metrics.totalTrades,
@@ -766,11 +825,11 @@ export class PaperTradingEngine {
             winningTrades: state.metrics.winningTrades || 0,
             losingTrades: state.metrics.losingTrades || 0,
             totalFeesUSD: state.metrics.totalFeesUSD || 0,
-            executionsPerMin: state.metrics.duration > 0 
-              ? (state.metrics.totalTrades / (state.metrics.duration / 60000)) 
+            executionsPerMin: state.metrics.duration > 0
+              ? (state.metrics.totalTrades / (state.metrics.duration / 60000))
               : 0
           },
-          
+
           // FLATTENED METRICS AT TOP LEVEL - for frontend compatibility (production-ready)
           winningTrades: state.metrics.winningTrades || 0,
           losingTrades: state.metrics.losingTrades || 0,
@@ -842,7 +901,7 @@ export class PaperTradingEngine {
           tokenSymbol: marketData.tokenSymbol, // Token symbol
           priceUSD: marketData.priceUSD, // Token price in USD
           timestamp: Date.now(),
-          
+
           // Complete portfolio snapshot
           portfolioSnapshot: {
             balanceSOL: state.portfolio.balanceSOL,
@@ -856,14 +915,14 @@ export class PaperTradingEngine {
             unrealizedPnLUSD: state.metrics.unrealizedPnLUSD,
             realizedPnL: state.metrics.realizedPnL,
             realizedPnLUSD: state.metrics.realizedPnLUSD,
-            
+
             // Portfolio allocation breakdown
             allocation: {
               solPercentage: (state.portfolio.balanceSOL * marketData.solPrice / state.metrics.totalValueUSD) * 100,
               usdcPercentage: (state.portfolio.balanceUSDC / state.metrics.totalValueUSD) * 100,
               tokenPercentage: (state.portfolio.balanceTokens * marketData.priceUSD / state.metrics.totalValueUSD) * 100
             },
-            
+
             // Capital utilization
             capitalUtilization: {
               totalCapital: state.config.initialBalanceSOL * marketData.solPrice + state.config.initialBalanceUSDC,
@@ -872,12 +931,12 @@ export class PaperTradingEngine {
               utilizationPercentage: ((state.config.initialBalanceSOL * marketData.solPrice + state.config.initialBalanceUSDC) - (state.portfolio.balanceSOL * marketData.solPrice + state.portfolio.balanceUSDC)) / (state.config.initialBalanceSOL * marketData.solPrice + state.config.initialBalanceUSDC) * 100
             }
           },
-          
+
           // Current market data
           currentPrice: basePrice,
           currentPriceUSD: marketData.priceUSD,
           solPriceUSD: marketData.solPrice,
-          
+
           // Market depth (if available)
           marketData: {
             source: marketData.source || 'jupiter',
@@ -887,7 +946,7 @@ export class PaperTradingEngine {
             low24h: marketData.low24h || basePrice,
             liquidity: marketData.liquidity || 0
           },
-          
+
           // Strategy execution context
           strategyInfo: {
             strategyId: strategyId,
@@ -898,7 +957,7 @@ export class PaperTradingEngine {
             sessionDuration: Date.now() - state.startTime,
             lastTradeTime: trade.timestamp
           },
-          
+
           // Detailed trade information
           tradeDetails: {
             tradeId: trade.id,
@@ -909,7 +968,7 @@ export class PaperTradingEngine {
             executionPrice: basePrice,
             marketPrice: basePrice,
             averageEntryPrice: eventData.position.averageEntryPrice,
-            
+
             fees: {
               tradingFee: tradingFee,
               tradingFeeUSD: tradingFee * marketData.solPrice,
@@ -920,19 +979,19 @@ export class PaperTradingEngine {
               slippage: slippageAmount,
               slippageUSD: slippageAmount * marketData.solPrice
             },
-            
+
             costBasis: amountSOL,
             costBasisUSD: solToUSD,
             breakEvenPrice: eventData.position.breakEvenPrice,
             timestamp: trade.timestamp
           },
-          
+
           // Session-wide statistics
           sessionStats: {
             totalTrades: state.trades.length,
             totalVolume: state.trades.reduce((sum, t) => sum + (t.amountSOL * t.solPriceUSD), 0),
-            averageTradeSize: state.trades.length > 0 
-              ? state.trades.reduce((sum, t) => sum + (t.amountSOL * t.solPriceUSD), 0) / state.trades.length 
+            averageTradeSize: state.trades.length > 0
+              ? state.trades.reduce((sum, t) => sum + (t.amountSOL * t.solPriceUSD), 0) / state.trades.length
               : 0,
             tradingFrequency: tradesPerMinute,
             buyTrades: state.trades.filter(t => t.type === 'buy').length,
@@ -973,7 +1032,7 @@ export class PaperTradingEngine {
     trigger?: string
   ): Promise<OrderExecutionResult> {
     const state = this.sessions.get(sessionId);
-    
+
     if (!state || !state.isActive) {
       return {
         success: false,
@@ -982,15 +1041,15 @@ export class PaperTradingEngine {
     }
 
     const portfolio = new PaperTradingPortfolio(0, 0);
-    portfolio.importState({ 
-      portfolio: state.portfolio, 
-      trades: state.trades, 
-      startTime: state.startTime 
+    portfolio.importState({
+      portfolio: state.portfolio,
+      trades: state.trades,
+      startTime: state.startTime
     });
 
     // Determine trade type: SOL → USD or TOKEN → SOL
     const isSellingSol = tokenAddress === SOL_ADDRESS;
-    
+
     if (isSellingSol) {
       // CASE 1: SELLING SOL FOR USD
       return await this.executeSellSolForUsd(
@@ -1033,7 +1092,7 @@ export class PaperTradingEngine {
   ): Promise<OrderExecutionResult> {
     // Check if position exists and has sufficient tokens
     const position = portfolio.getPosition(tokenAddress);
-    
+
     if (!position || position.amount < tokenAmount) {
       this.log(sessionId, 'error', 'Insufficient SOL balance for sell order', {
         required: tokenAmount,
@@ -1050,7 +1109,7 @@ export class PaperTradingEngine {
     try {
       // Fetch real-time market data
       const marketData = await marketDataProvider.fetchTokenPrice(tokenAddress);
-      
+
       if (!marketData) {
         this.log(sessionId, 'error', 'Failed to fetch market data', { tokenAddress });
         return {
@@ -1061,7 +1120,7 @@ export class PaperTradingEngine {
 
       const solToSell = tokenAmount;
       const basePrice = marketData.solPrice; // SOL price in USD
-      
+
       // Calculate slippage
       const slippageAmount = state.config.enableSlippage
         ? basePrice * (state.config.slippagePercentage / 100)
@@ -1070,7 +1129,7 @@ export class PaperTradingEngine {
 
       // Calculate USD we get from selling SOL
       const usdBeforeFees = solToSell * executionPrice;
-      
+
       // Calculate fees (in USD)
       const tradingFee = state.config.enableFees
         ? usdBeforeFees * (state.config.tradingFeePercentage / 100)
@@ -1139,8 +1198,8 @@ export class PaperTradingEngine {
         totalTrades: state.metrics.totalTrades,
         totalFeesUSD: state.metrics.totalFeesUSD,
         duration: state.metrics.duration,
-        executionsPerMin: state.metrics.duration > 0 
-          ? (state.metrics.totalTrades / (state.metrics.duration / 60000)) 
+        executionsPerMin: state.metrics.duration > 0
+          ? (state.metrics.totalTrades / (state.metrics.duration / 60000))
           : 0
       });
 
@@ -1163,20 +1222,20 @@ export class PaperTradingEngine {
       // Emit WebSocket event
       if (this.io) {
         const remainingPosition = portfolio.getPosition(tokenAddress);
-        
+
         // Calculate portfolio allocation
         const totalPortfolioValueUSD = state.metrics.totalValueUSD;
-        const remainingPositionValueUSD = remainingPosition 
-          ? remainingPosition.amount * basePrice 
+        const remainingPositionValueUSD = remainingPosition
+          ? remainingPosition.amount * basePrice
           : 0;
-        const allocationPercentage = totalPortfolioValueUSD > 0 
-          ? (remainingPositionValueUSD / totalPortfolioValueUSD) * 100 
+        const allocationPercentage = totalPortfolioValueUSD > 0
+          ? (remainingPositionValueUSD / totalPortfolioValueUSD) * 100
           : 0;
-        
+
         // Calculate trade velocity
         const sessionDuration = (Date.now() - state.startTime) / 60000;
         const tradesPerMinute = sessionDuration > 0 ? state.trades.length / sessionDuration : 0;
-        
+
         // Calculate balance deltas
         const balanceDeltas = {
           solDelta: -solToSell, // Negative because we're selling SOL
@@ -1184,7 +1243,7 @@ export class PaperTradingEngine {
           tokenDelta: 0,
           totalValueDelta: realizedPnL // Realized P&L
         };
-        
+
         const eventData = {
           sessionId,
           side: 'sell',
@@ -1202,7 +1261,7 @@ export class PaperTradingEngine {
           executionTimeMs: Date.now() - trade.timestamp,
           tradeId: trade.id,
           totalTrades: state.trades.length,
-          
+
           // Enhanced fee breakdown
           fees: {
             tradingFee: tradingFee,
@@ -1213,7 +1272,7 @@ export class PaperTradingEngine {
             totalFeesUSD: totalFeesUSD,
             feePercentage: (totalFeesUSD / usdBeforeFees) * 100
           },
-          
+
           // Slippage impact
           slippage: {
             amount: slippageAmount * tokenAmount,
@@ -1221,7 +1280,7 @@ export class PaperTradingEngine {
             percentage: state.config.slippagePercentage,
             impactOnPrice: (slippageAmount / basePrice) * 100
           },
-          
+
           // Position details after sell
           position: {
             tokenAddress: tokenAddress,
@@ -1237,10 +1296,10 @@ export class PaperTradingEngine {
             soldAmount: solToSell,
             soldPercentage: position ? (solToSell / position.amount) * 100 : 0
           },
-          
+
           // Balance changes
           balanceDeltas: balanceDeltas,
-          
+
           // Current balances after trade
           balances: {
             solBalance: state.portfolio.balanceSOL,
@@ -1249,7 +1308,7 @@ export class PaperTradingEngine {
             totalValueUSD: state.metrics.totalValueUSD,
             availableCash: state.portfolio.balanceSOL * marketData.solPrice + state.portfolio.balanceUSDC
           },
-          
+
           // Execution details
           execution: {
             orderType: 'market',
@@ -1260,14 +1319,14 @@ export class PaperTradingEngine {
             priceDeviation: ((executionPrice - basePrice) / basePrice) * 100,
             fillRate: 100
           },
-          
+
           // Trading velocity
           velocity: {
             tradesPerMinute: tradesPerMinute,
             sessionDuration: sessionDuration,
             averageTradeInterval: sessionDuration > 0 ? sessionDuration / state.trades.length : 0
           },
-          
+
           // Comprehensive metrics
           metrics: {
             totalTrades: state.metrics.totalTrades,
@@ -1284,13 +1343,13 @@ export class PaperTradingEngine {
             winningTrades: state.metrics.winningTrades || 0,
             losingTrades: state.metrics.losingTrades || 0,
             totalFeesUSD: state.metrics.totalFeesUSD || 0,
-            executionsPerMin: state.metrics.duration > 0 
-              ? (state.metrics.totalTrades / (state.metrics.duration / 60000)) 
+            executionsPerMin: state.metrics.duration > 0
+              ? (state.metrics.totalTrades / (state.metrics.duration / 60000))
               : 0,
             realizedPnL: state.metrics.realizedPnL,
             realizedPnLUSD: state.metrics.realizedPnLUSD
           },
-          
+
           // FLATTENED METRICS AT TOP LEVEL - for frontend compatibility (production-ready)
           // These allow frontend to access metrics without knowing if they're nested or not
           winningTrades: state.metrics.winningTrades || 0,
@@ -1303,7 +1362,7 @@ export class PaperTradingEngine {
           avgWin: state.metrics.averageWin || 0,
           avgLoss: state.metrics.averageLoss || 0
         };
-        
+
         console.log('📡 Emitting paper:trade:executed (SELL) - FLATTENED METRICS:', {
           'TOP_LEVEL.winRate': eventData.winRate,
           'TOP_LEVEL.profitFactor': eventData.profitFactor,
@@ -1325,7 +1384,7 @@ export class PaperTradingEngine {
             winningTrades: eventData.metrics.winningTrades
           } : null
         }, null, 2));
-        
+
         this.io.emit('paper:trade:executed', eventData);
         console.log(`📊 [PaperTradingEngine] Emitted SELL trade execution to UI (total trades: ${state.trades.length}, P&L: $${realizedPnL.toFixed(2)})`);
 
@@ -1333,7 +1392,7 @@ export class PaperTradingEngine {
           sessionId,
           type: 'sell_executed',
           timestamp: Date.now(),
-          
+
           // Complete portfolio snapshot
           portfolioSnapshot: {
             balanceSOL: state.portfolio.balanceSOL,
@@ -1351,14 +1410,14 @@ export class PaperTradingEngine {
             realizedPnLUSD: state.metrics.realizedPnLUSD,
             unrealizedPnL: state.metrics.unrealizedPnL,
             unrealizedPnLUSD: state.metrics.unrealizedPnLUSD,
-            
+
             // Portfolio allocation
             allocation: {
               solPercentage: (state.portfolio.balanceSOL * marketData.solPrice / state.metrics.totalValueUSD) * 100,
               usdcPercentage: (state.portfolio.balanceUSDC / state.metrics.totalValueUSD) * 100,
               tokenPercentage: (state.portfolio.balanceTokens * marketData.priceUSD / state.metrics.totalValueUSD) * 100
             },
-            
+
             // Capital utilization
             capitalUtilization: {
               totalCapital: state.config.initialBalanceSOL * marketData.solPrice + state.config.initialBalanceUSDC,
@@ -1367,11 +1426,11 @@ export class PaperTradingEngine {
               utilizationPercentage: ((state.config.initialBalanceSOL * marketData.solPrice + state.config.initialBalanceUSDC) - (state.portfolio.balanceSOL * marketData.solPrice + state.portfolio.balanceUSDC)) / (state.config.initialBalanceSOL * marketData.solPrice + state.config.initialBalanceUSDC) * 100
             }
           },
-          
+
           currentPrice: basePrice,
           currentPriceUSD: marketData.solPrice,
           tokenSymbol: 'SOL',
-          
+
           // Market data
           marketData: {
             source: marketData.source || 'jupiter',
@@ -1381,7 +1440,7 @@ export class PaperTradingEngine {
             low24h: marketData.low24h || basePrice,
             liquidity: marketData.liquidity || 0
           },
-          
+
           strategyInfo: {
             strategyId: strategyId,
             strategyName: strategyName,
@@ -1391,7 +1450,7 @@ export class PaperTradingEngine {
             sessionDuration: Date.now() - state.startTime,
             lastTradeTime: trade.timestamp
           },
-          
+
           tradeDetails: {
             tradeId: trade.id,
             type: 'sell',
@@ -1400,7 +1459,7 @@ export class PaperTradingEngine {
             executionPrice: executionPrice,
             marketPrice: basePrice,
             averageEntryPrice: position.averageEntryPrice,
-            
+
             fees: {
               tradingFee: tradingFee,
               tradingFeeUSD: tradingFee,
@@ -1411,7 +1470,7 @@ export class PaperTradingEngine {
               slippage: slippageAmount,
               slippageUSD: slippageAmount * tokenAmount
             },
-            
+
             realizedPnL: realizedPnLSOL,
             realizedPnLUSD: realizedPnL,
             costBasis: costBasisUSD / marketData.solPrice,
@@ -1419,13 +1478,13 @@ export class PaperTradingEngine {
             profitPercentage: (realizedPnL / costBasisUSD) * 100,
             timestamp: trade.timestamp
           },
-          
+
           // Session-wide statistics
           sessionStats: {
             totalTrades: state.trades.length,
             totalVolume: state.trades.reduce((sum, t) => sum + (t.amountSOL * t.solPriceUSD), 0),
-            averageTradeSize: state.trades.length > 0 
-              ? state.trades.reduce((sum, t) => sum + (t.amountSOL * t.solPriceUSD), 0) / state.trades.length 
+            averageTradeSize: state.trades.length > 0
+              ? state.trades.reduce((sum, t) => sum + (t.amountSOL * t.solPriceUSD), 0) / state.trades.length
               : 0,
             tradingFrequency: tradesPerMinute,
             buyTrades: state.trades.filter(t => t.type === 'buy').length,
@@ -1468,7 +1527,7 @@ export class PaperTradingEngine {
   ): Promise<OrderExecutionResult> {
     // Check token balance
     let position = portfolio.getPosition(tokenAddress);
-    
+
     // Handle "-1" as "sell all tokens"
     let actualTokenAmount = tokenAmount;
     if (tokenAmount === -1) {
@@ -1486,69 +1545,69 @@ export class PaperTradingEngine {
       actualTokenAmount = position.amount;
       console.log(`💡 [PaperTradingEngine] Converting "sell all" (-1) to actual amount: ${actualTokenAmount} tokens`);
     }
-    
-      // AUTO-INITIALIZE: If this is a SELL strategy and we don't have this token yet,
-      // simulate that we bought tokens earlier (mirror strategy assumption)
-      if (!position && strategyName.toLowerCase().includes('sell')) {
-        console.log(`🔄 [PaperTradingEngine] Auto-initializing tokens for ${tokenAddress} (SELL strategy)`);
-        
-        // Fetch REAL current market price for accurate auto-initialization
-        const marketData = await marketDataProvider.fetchTokenPrice(tokenAddress);
-        
-        if (!marketData) {
-          this.log(sessionId, 'error', 'Failed to fetch market data for auto-initialization', { tokenAddress });
-          return {
-            success: false,
-            error: 'Failed to fetch market data for token auto-initialization',
-          };
-        }
-        
-        // CRITICAL FIX: Dynamic initial balance with intelligent priority
-        // Priority: 1) config.supply 2) initialTokenBalance 3) initialSupply 4) Detected mirror amount 5) Default 1M
-        const configSupply = (state.config as any).supply;
-        const initialTokenBalance = (state.config as any).initialTokenBalance;
-        const initialSupply = (state.config as any).initialSupply;
-        const detectedMirrorAmount = actualTokenAmount > 0 && actualTokenAmount !== -1 
-          ? actualTokenAmount 
-          : null;
 
-        let autoInitTokens: number;
-        let initSource: string;
+    // AUTO-INITIALIZE: If this is a SELL strategy and we don't have this token yet,
+    // simulate that we bought tokens earlier (mirror strategy assumption)
+    if (!position && strategyName.toLowerCase().includes('sell')) {
+      console.log(`🔄 [PaperTradingEngine] Auto-initializing tokens for ${tokenAddress} (SELL strategy)`);
 
-        if (configSupply && configSupply > 0) {
-          // Priority 1: Use config.supply (from parsed strategy)
-          autoInitTokens = parseFloat(configSupply.toString());
-          initSource = `config.supply (${autoInitTokens.toLocaleString()})`;
-        } else if (initialTokenBalance && initialTokenBalance > 0) {
-          // Priority 2: Use initialTokenBalance
-          autoInitTokens = parseFloat(initialTokenBalance.toString());
-          initSource = `initialTokenBalance (${autoInitTokens.toLocaleString()})`;
-        } else if (initialSupply && initialSupply > 0) {
-          // Priority 3: Use initialSupply
-          autoInitTokens = parseFloat(initialSupply.toString());
-          initSource = `initialSupply (${autoInitTokens.toLocaleString()})`;
-        } else if (detectedMirrorAmount && detectedMirrorAmount >= 1000) {
-          // Priority 4: Calculate from detected mirror amount
-          autoInitTokens = Math.ceil(detectedMirrorAmount * 50);
-          initSource = `calculated from mirror (${detectedMirrorAmount.toLocaleString()} x 50)`;
-        } else {
-          // Priority 5: Absolute last fallback
-          autoInitTokens = 1000000;
-          initSource = 'default fallback (1M)';
-        }
+      // Fetch REAL current market price for accurate auto-initialization
+      const marketData = await marketDataProvider.fetchTokenPrice(tokenAddress);
 
-        console.log(`\n💰 ========== AUTO-INIT TOKEN BALANCE ==========`);
-        console.log(`💰 Final Balance: ${autoInitTokens.toLocaleString()} tokens`);
-        console.log(`💰 Source: ${initSource}`);
-        console.log(`💰 Token: ${tokenAddress.substring(0, 8)}...`);
-        console.log(`💰 ============================================\n`);
+      if (!marketData) {
+        this.log(sessionId, 'error', 'Failed to fetch market data for auto-initialization', { tokenAddress });
+        return {
+          success: false,
+          error: 'Failed to fetch market data for token auto-initialization',
+        };
+      }
+
+      // CRITICAL FIX: Dynamic initial balance with intelligent priority
+      // Priority: 1) config.supply 2) initialTokenBalance 3) initialSupply 4) Detected mirror amount 5) Default 1M
+      const configSupply = (state.config as any).supply;
+      const initialTokenBalance = (state.config as any).initialTokenBalance;
+      const initialSupply = (state.config as any).initialSupply;
+      const detectedMirrorAmount = actualTokenAmount > 0 && actualTokenAmount !== -1
+        ? actualTokenAmount
+        : null;
+
+      let autoInitTokens: number;
+      let initSource: string;
+
+      if (configSupply && configSupply > 0) {
+        // Priority 1: Use config.supply (from parsed strategy)
+        autoInitTokens = parseFloat(configSupply.toString());
+        initSource = `config.supply (${autoInitTokens.toLocaleString()})`;
+      } else if (initialTokenBalance && initialTokenBalance > 0) {
+        // Priority 2: Use initialTokenBalance
+        autoInitTokens = parseFloat(initialTokenBalance.toString());
+        initSource = `initialTokenBalance (${autoInitTokens.toLocaleString()})`;
+      } else if (initialSupply && initialSupply > 0) {
+        // Priority 3: Use initialSupply
+        autoInitTokens = parseFloat(initialSupply.toString());
+        initSource = `initialSupply (${autoInitTokens.toLocaleString()})`;
+      } else if (detectedMirrorAmount && detectedMirrorAmount >= 1000) {
+        // Priority 4: Calculate from detected mirror amount
+        autoInitTokens = Math.ceil(detectedMirrorAmount * 50);
+        initSource = `calculated from mirror (${detectedMirrorAmount.toLocaleString()} x 50)`;
+      } else {
+        // Priority 5: Absolute last fallback
+        autoInitTokens = 1000000;
+        initSource = 'default fallback (1M)';
+      }
+
+      console.log(`\n💰 ========== AUTO-INIT TOKEN BALANCE ==========`);
+      console.log(`💰 Final Balance: ${autoInitTokens.toLocaleString()} tokens`);
+      console.log(`💰 Source: ${initSource}`);
+      console.log(`💰 Token: ${tokenAddress.substring(0, 8)}...`);
+      console.log(`💰 ============================================\n`);
 
       const marketPrice = marketData.price; // Real token price in SOL
       const priceUSD = marketData.priceUSD; // Real token price in USD
       const solPriceUSD = marketData.solPrice; // Real SOL price in USD
       const costBasisSOL = autoInitTokens * marketPrice; // Cost = current value (neutral P&L)
       const costBasisUSD = autoInitTokens * priceUSD; // Cost = current value in USD
-      
+
       const now = Date.now();
       const mockBuyTrade: PaperTrade = {
         id: uuidv4(),
@@ -1579,16 +1638,16 @@ export class PaperTradingEngine {
         realizedPnL: 0, // Neutral position (cost = value)
         trigger: 'auto_init_for_sell_strategy',
       };
-      
+
       portfolio.addTrade(mockBuyTrade);
       state.trades.push(mockBuyTrade);
-      
+
       // Update state portfolio
       state.portfolio = portfolio.getPortfolio();
-      
+
       // Refresh position reference
       position = portfolio.getPosition(tokenAddress);
-      
+
       console.log(`\n✅ [AUTO-INIT] Virtual position created for ${marketData.tokenSymbol || 'TOKEN'}`);
       console.log(`📦 Tokens: ${autoInitTokens.toLocaleString()}`);
       console.log(`💰 Current Price: ${marketPrice.toFixed(10)} SOL/token`);
@@ -1596,12 +1655,12 @@ export class PaperTradingEngine {
       console.log(`💎 Current Value: ${costBasisSOL.toFixed(6)} SOL ($${costBasisUSD.toFixed(2)} USD)`);
       console.log(`📈 Initial P&L: $0.00 (cost = value, neutral position)`);
       console.log(`🎯 This means: When price moves, P&L will reflect actual gains/losses\n`);
-      
+
       // Emit balance update to UI immediately after auto-init
       if (this.io) {
         const positions = Array.from((portfolio as any).Positioins?.values() || []);
         const tokenSymbols = marketData.tokenSymbol || 'TOKEN';
-        
+
         const balanceUpdateEvent = {
           sessionId,
           timestamp: Date.now(),
@@ -1625,16 +1684,16 @@ export class PaperTradingEngine {
             valueUSD: pos.currentValueUSD || 0,
             unrealizedPnL: pos.unrealizedPnL || 0,
           })),
-          
+
           totalValueUSD: state.portfolio.balanceSOL * solPriceUSD,
           positions: positions,
-          isAutoInit: true 
+          isAutoInit: true
         };
         this.io.emit('paper:balance:update', balanceUpdateEvent);
         console.log(`📡 [WebSocket] Emitted balance update after auto-init`);
       }
     }
-    
+
     if (!position || position.amount < actualTokenAmount) {
       this.log(sessionId, 'error', 'Insufficient token balance for sell order', {
         required: actualTokenAmount,
@@ -1654,7 +1713,7 @@ export class PaperTradingEngine {
       let marketData = null;
       let lastError = '';
       const maxRetries = 3;
-      
+
       for (let attempt = 1; attempt <= maxRetries; attempt++) {
         try {
           marketData = await marketDataProvider.fetchTokenPrice(tokenAddress);
@@ -1667,7 +1726,7 @@ export class PaperTradingEngine {
           }
         }
       }
-      
+
       if (!marketData) {
         this.log(sessionId, 'error', 'Failed to fetch market data after retries', { tokenAddress, lastError });
         return {
@@ -1678,28 +1737,28 @@ export class PaperTradingEngine {
 
       const tokensToSell = actualTokenAmount;
       const basePrice = marketData.price; // Token price in SOL
-      
+
       // Calculate slippage (price drops when selling)
       const slippageAmount = state.config.enableSlippage
         ? basePrice * (state.config.slippagePercentage / 100)
         : 0;
       const executionPrice = basePrice - slippageAmount; // Lower price due to slippage
-      
+
       // Calculate SOL received (before fees)
       const solBeforeFees = tokensToSell * executionPrice;
-      
+
       // Calculate fees (in SOL)
       const tradingFee = state.config.enableFees
         ? solBeforeFees * (state.config.tradingFeePercentage / 100)
         : 0;
-      const networkFee = state.config.enableFees 
-        ? state.config.networkFeeSOL 
+      const networkFee = state.config.enableFees
+        ? state.config.networkFeeSOL
         : 0;
       const totalFees = tradingFee + networkFee;
-      
+
       // Final SOL received after fees
       const solReceived = solBeforeFees - totalFees;
-      
+
       // TODO #2: Capture balance BEFORE trade for real-time tracking
       const balanceBefore = {
         sol: state.portfolio.balanceSOL,
@@ -1707,12 +1766,12 @@ export class PaperTradingEngine {
         tokens: position.amount,
         totalValueUSD: state.portfolio.totalValueUSD,
       };
-      
+
       // Calculate realized P&L (in SOL)
       const costBasisSOL = tokensToSell * position.averageEntryPrice;
       const realizedPnL = solReceived - costBasisSOL;
       const realizedPnLUSD = realizedPnL * marketData.solPrice;
-      
+
       // Create trade record
       const trade: PaperTrade = {
         id: uuidv4(),
@@ -1743,13 +1802,13 @@ export class PaperTradingEngine {
         realizedPnL,
         trigger,
       };
-      
+
       // Update portfolio
       portfolio.addTrade(trade);
       state.portfolio = portfolio.getPortfolio();
       state.lastTradeTime = trade.timestamp;
       state.metrics = await portfolio.calculateMetrics(strategyId, strategyName);
-      
+
       // Emit real-time balance update IMMEDIATELY after SELL trade
       if (this.io) {
         const balanceAfter = {
@@ -1762,21 +1821,37 @@ export class PaperTradingEngine {
         // ENHANCED: Get token-specific data (may be null if fully closed)
         const position = portfolio.getPosition(tokenAddress);
         const tokenSymbol = marketData.tokenSymbol || 'TOKEN';
+        
+        // CRITICAL FIX: Calculate consistent ROI for SELL balance update
+        const initialInvestmentUSD = state.config.initialBalanceSOL * marketData.solPrice + state.config.initialBalanceUSDC;
+        const currentTotalValueUSD = state.metrics.totalValueUSD;
+        const consistentROI = initialInvestmentUSD > 0 
+          ? ((currentTotalValueUSD - initialInvestmentUSD) / initialInvestmentUSD) * 100 
+          : 0;
+        
+        console.log('🔄 [Balance Update SELL] ROI Consistency Check:', {
+          'state.metrics.roi': state.metrics.roi?.toFixed(2),
+          'calculated consistentROI': consistentROI.toFixed(2),
+          'realizedPnL': realizedPnL.toFixed(6),
+          'realizedPnLUSD': realizedPnLUSD.toFixed(2),
+          initialInvestmentUSD: initialInvestmentUSD.toFixed(2),
+          currentTotalValueUSD: currentTotalValueUSD.toFixed(2)
+        });
 
         const balanceUpdateEvent = {
           sessionId,
           timestamp: Date.now(),
           tradeId: trade.id,
           tradeType: 'sell',
-          
+
           // TOP-LEVEL PROPERTIES for frontend compatibility
           balanceSOL: balanceAfter.sol,
           balanceUSDC: balanceAfter.usdc,
           balanceTokens: balanceAfter.tokens,
           totalValueUSD: balanceAfter.totalValueUSD,
           totalPnLUSD: state.metrics.totalPnLUSD || 0,
-          roi: state.metrics.roi || 0,
-          
+          roi: consistentROI,
+
           // Before/After snapshots with millisecond precision
           before: {
             balanceSOL: balanceBefore.sol,
@@ -1790,7 +1865,7 @@ export class PaperTradingEngine {
             balanceTokens: balanceAfter.tokens,
             totalValueUSD: balanceAfter.totalValueUSD,
           },
-          
+
           // Deltas with millisecond precision
           deltas: {
             solDelta: balanceAfter.sol - balanceBefore.sol,
@@ -1807,7 +1882,7 @@ export class PaperTradingEngine {
             balanceBefore: balanceBefore.tokens,
             balanceDelta: balanceAfter.tokens - balanceBefore.tokens,
           },
-          
+
           // Available capital
           availableCapital: {
             sol: balanceAfter.sol,
@@ -1815,7 +1890,7 @@ export class PaperTradingEngine {
             totalUSD: (balanceAfter.sol * marketData.solPrice) + balanceAfter.usdc,
             marginUsed: 0, // For future margin trading
           },
-          
+
           // Trade execution details
           executionDetails: {
             tokensSold: tokensToSell,
@@ -1841,25 +1916,25 @@ export class PaperTradingEngine {
         };
 
         this.io.emit('paper:balance:update', balanceUpdateEvent);
-        console.log('💰 [Balance Update] SOL: %s → %s, Tokens: %s → %s, P&L: $%s', 
+        console.log('💰 [Balance Update] SOL: %s → %s, Tokens: %s → %s, P&L: $%s',
           balanceBefore.sol.toFixed(6), balanceAfter.sol.toFixed(6),
           balanceBefore.tokens.toFixed(2), balanceAfter.tokens.toFixed(2),
           realizedPnLUSD.toFixed(4)
         );
       }
-      
+
       this.log(
-        sessionId, 
-        'trade', 
+        sessionId,
+        'trade',
         `Sell TOKEN executed: ${tokensToSell.toFixed(4)} tokens for ${solReceived.toFixed(6)} SOL`,
-        { 
+        {
           trade,
           realizedPnL,
           realizedPnLUSD,
-          tokenAddress 
+          tokenAddress
         }
       );
-      
+
       await awsLogger.info('Paper trade executed (SELL TOKEN→SOL)', {
         metadata: {
           sessionId,
@@ -1872,16 +1947,16 @@ export class PaperTradingEngine {
           trigger,
         }
       });
-      
+
       // Emit WebSocket event
       if (this.io) {
         // Standardize event structure to match BUY events (comprehensive metrics, proper formatting)
         const sessionDuration = (Date.now() - state.startTime) / 60000; // in minutes
         const tradesPerMinute = sessionDuration > 0 ? state.trades.length / sessionDuration : 0;
-        const allocationPercentage = state.metrics.totalValueUSD > 0 
-          ? ((state.portfolio.balanceTokens * marketData.priceUSD) / state.metrics.totalValueUSD) * 100 
+        const allocationPercentage = state.metrics.totalValueUSD > 0
+          ? ((state.portfolio.balanceTokens * marketData.priceUSD) / state.metrics.totalValueUSD) * 100
           : 0;
-        
+
         const eventData = {
           sessionId,
           side: 'sell',
@@ -1902,7 +1977,7 @@ export class PaperTradingEngine {
           executionTimeMs: Date.now() - trade.timestamp, // Execution latency
           tradeId: trade.id,
           totalTrades: state.trades.length,
-          
+
           // Enhanced fee breakdown (consistent with BUY)
           fees: {
             tradingFee: tradingFee,
@@ -1913,7 +1988,7 @@ export class PaperTradingEngine {
             totalFeesUSD: totalFees * marketData.solPrice,
             feePercentage: (totalFees / solReceived) * 100
           },
-          
+
           // Slippage impact (consistent with BUY)
           slippage: {
             amount: slippageAmount,
@@ -1921,7 +1996,7 @@ export class PaperTradingEngine {
             percentage: state.config.slippagePercentage,
             impactOnPrice: (slippageAmount / basePrice) * 100
           },
-          
+
           // Position details (consistent with BUY)
           position: {
             tokenAddress: tokenAddress,
@@ -1936,7 +2011,7 @@ export class PaperTradingEngine {
             allocationPercentage: allocationPercentage,
             totalPositionSize: state.portfolio.balanceTokens
           },
-          
+
           // Balance changes (consistent with BUY)
           balanceDeltas: {
             solDelta: solReceived - totalFees, // Positive (received SOL)
@@ -1944,7 +2019,7 @@ export class PaperTradingEngine {
             tokenDelta: -tokensToSell, // Negative (sold tokens)
             totalValueDelta: realizedPnLUSD
           },
-          
+
           // Current balances after trade (consistent with BUY)
           balances: {
             solBalance: state.portfolio.balanceSOL,
@@ -1953,7 +2028,7 @@ export class PaperTradingEngine {
             totalValueUSD: state.metrics.totalValueUSD,
             availableCash: state.portfolio.balanceSOL + state.portfolio.balanceUSDC / marketData.solPrice
           },
-          
+
           // Execution details (consistent with BUY)
           execution: {
             orderType: 'market',
@@ -1964,20 +2039,20 @@ export class PaperTradingEngine {
             priceDeviation: ((executionPrice - basePrice) / basePrice) * 100,
             fillRate: 100
           },
-          
+
           // Trading velocity (consistent with BUY)
           velocity: {
             tradesPerMinute: tradesPerMinute,
             sessionDuration: sessionDuration,
             averageTradeInterval: sessionDuration > 0 ? sessionDuration / state.trades.length : 0
           },
-          
+
           strategyInfo: {
             strategyId: strategyId,
             strategyName: strategyName,
             trigger: trigger
           },
-          
+
           // Comprehensive metrics (consistent with BUY)
           metrics: {
             totalTrades: state.metrics.totalTrades,
@@ -1994,13 +2069,13 @@ export class PaperTradingEngine {
             winningTrades: state.metrics.winningTrades || 0,
             losingTrades: state.metrics.losingTrades || 0,
             totalFeesUSD: state.metrics.totalFeesUSD || 0,
-            executionsPerMin: state.metrics.duration > 0 
-              ? (state.metrics.totalTrades / (state.metrics.duration / 60000)) 
+            executionsPerMin: state.metrics.duration > 0
+              ? (state.metrics.totalTrades / (state.metrics.duration / 60000))
               : 0,
             realizedPnL: state.metrics.realizedPnL,
             realizedPnLUSD: state.metrics.realizedPnLUSD
           },
-          
+
           // FLATTENED METRICS AT TOP LEVEL - for frontend compatibility (consistent with BUY)
           winningTrades: state.metrics.winningTrades || 0,
           losingTrades: state.metrics.losingTrades || 0,
@@ -2013,7 +2088,7 @@ export class PaperTradingEngine {
           avgLoss: state.metrics.averageLoss || 0,
           tokenAddress: tokenAddress
         };
-        
+
         console.log('📡 Emitting paper:trade:executed (SELL TOKEN→SOL) - FLATTENED METRICS:', {
           'TOP_LEVEL.winRate': eventData.winRate,
           'TOP_LEVEL.profitFactor': eventData.profitFactor,
@@ -2024,10 +2099,10 @@ export class PaperTradingEngine {
           solReceived: solReceived.toFixed(6),
           realizedPnL: realizedPnLUSD.toFixed(4)
         });
-        
+
         this.io.emit('paper:trade:executed', eventData);
         console.log(`📊 [PaperTradingEngine] Emitted SELL TOKEN→SOL trade execution to UI (total trades: ${state.trades.length})`);
-        
+
         const simulationData = {
           sessionId,
           type: 'sell_executed',
@@ -2075,10 +2150,10 @@ export class PaperTradingEngine {
             timestamp: trade.timestamp
           }
         };
-        
+
         this.io.emit('paper:simulation:update', simulationData);
       }
-      
+
       return {
         success: true,
         trade,
@@ -2101,7 +2176,7 @@ export class PaperTradingEngine {
    */
   async getMetrics(sessionId: string): Promise<PaperTradingMetrics | null> {
     const state = this.sessions.get(sessionId);
-    
+
     if (!state) {
       return null;
     }
@@ -2129,13 +2204,13 @@ export class PaperTradingEngine {
    */
   pauseSession(sessionId: string): boolean {
     const state = this.sessions.get(sessionId);
-    
+
     if (state) {
       state.isActive = false;
       this.log(sessionId, 'info', 'Session paused');
       return true;
     }
-    
+
     return false;
   }
 
@@ -2144,13 +2219,13 @@ export class PaperTradingEngine {
    */
   resumeSession(sessionId: string): boolean {
     const state = this.sessions.get(sessionId);
-    
+
     if (state) {
       state.isActive = true;
       this.log(sessionId, 'info', 'Session resumed');
       return true;
     }
-    
+
     return false;
   }
 
@@ -2159,15 +2234,15 @@ export class PaperTradingEngine {
    */
   async endSession(sessionId: string): Promise<boolean> {
     const state = this.sessions.get(sessionId);
-    
+
     if (state) {
       state.isActive = false;
-      
+
       const portfolio = new PaperTradingPortfolio(0, 0);
       portfolio.importState({ portfolio: state.portfolio, trades: state.trades, startTime: state.startTime });
-      
+
       state.metrics = await portfolio.calculateMetrics(state.metrics.strategyId, state.metrics.strategyName);
-      
+
       this.log(sessionId, 'info', 'Session ended', {
         metrics: state.metrics,
       });
@@ -2183,7 +2258,7 @@ export class PaperTradingEngine {
 
       return true;
     }
-    
+
     return false;
   }
 
@@ -2207,13 +2282,13 @@ export class PaperTradingEngine {
    */
   updateConfig(sessionId: string, config: Partial<PaperTradingConfig>): boolean {
     const state = this.sessions.get(sessionId);
-    
+
     if (state) {
       state.config = { ...state.config, ...config };
       this.log(sessionId, 'info', 'Configuration updated', { config });
       return true;
     }
-    
+
     return false;
   }
 
@@ -2222,7 +2297,7 @@ export class PaperTradingEngine {
    */
   async resetSession(sessionId: string): Promise<boolean> {
     const state = this.sessions.get(sessionId);
-    
+
     if (state) {
       const portfolio = new PaperTradingPortfolio(
         state.config.initialBalanceSOL,
@@ -2237,11 +2312,11 @@ export class PaperTradingEngine {
 
       // Clear logs
       this.logs.set(sessionId, []);
-      
+
       this.log(sessionId, 'info', 'Session reset');
       return true;
     }
-    
+
     return false;
   }
 
@@ -2255,7 +2330,7 @@ export class PaperTradingEngine {
     metadata?: Record<string, any>
   ): void {
     const logs = this.logs.get(sessionId) || [];
-    
+
     logs.push({
       timestamp: Date.now(),
       level,
@@ -2316,7 +2391,7 @@ export class PaperTradingEngine {
 
     const trades = this.getTradeHistory(sessionId, limit);
     const state = this.sessions.get(sessionId);
-    
+
     if (!state) {
       return;
     }
@@ -2364,62 +2439,62 @@ export class PaperTradingEngine {
 
     const metrics = state.metrics;
     const trades = state.trades;
-    
+
     // Calculate Sharpe Ratio (simplified - assuming daily returns)
     const returns = trades
       .filter(t => t.realizedPnL !== undefined)
       .map(t => t.realizedPnL || 0);
-    
-    const avgReturn = returns.length > 0 
-      ? returns.reduce((sum, r) => sum + r, 0) / returns.length 
+
+    const avgReturn = returns.length > 0
+      ? returns.reduce((sum, r) => sum + r, 0) / returns.length
       : 0;
-    
+
     const variance = returns.length > 1
       ? returns.reduce((sum, r) => sum + Math.pow(r - avgReturn, 2), 0) / (returns.length - 1)
       : 0;
-    
+
     const stdDev = Math.sqrt(variance);
     const sharpeRatio = stdDev > 0 ? (avgReturn / stdDev) * Math.sqrt(252) : 0; // Annualized
-    
+
     // Win/Loss analysis
     const profitableTrades = trades.filter(t => (t.realizedPnL || 0) > 0);
     const losingTrades = trades.filter(t => (t.realizedPnL || 0) < 0);
-    
+
     const totalWins = profitableTrades.reduce((sum, t) => sum + (t.realizedPnL || 0), 0);
     const totalLosses = Math.abs(losingTrades.reduce((sum, t) => sum + (t.realizedPnL || 0), 0));
-    
+
     const winLossRatio = profitableTrades.length > 0 && losingTrades.length > 0
       ? profitableTrades.length / losingTrades.length
       : profitableTrades.length > 0 ? Infinity : 0;
-    
+
     const profitFactor = totalLosses > 0 ? totalWins / totalLosses : totalWins > 0 ? Infinity : 0;
-    
-    const averageWin = profitableTrades.length > 0 
-      ? totalWins / profitableTrades.length 
+
+    const averageWin = profitableTrades.length > 0
+      ? totalWins / profitableTrades.length
       : 0;
-    
-    const averageLoss = losingTrades.length > 0 
-      ? totalLosses / losingTrades.length 
+
+    const averageLoss = losingTrades.length > 0
+      ? totalLosses / losingTrades.length
       : 0;
-    
+
     // Largest win/loss
     const largestWin = profitableTrades.length > 0
       ? Math.max(...profitableTrades.map(t => t.realizedPnL || 0))
       : 0;
-    
+
     const largestLoss = losingTrades.length > 0
       ? Math.min(...losingTrades.map(t => t.realizedPnL || 0))
       : 0;
-    
+
     // Consecutive wins/losses
     let consecutiveWins = 0;
     let consecutiveLosses = 0;
     let currentStreak = 0;
     let isWinStreak = false;
-    
+
     for (const trade of trades) {
       const isWin = (trade.realizedPnL || 0) > 0;
-      
+
       if (currentStreak === 0) {
         currentStreak = 1;
         isWinStreak = isWin;
@@ -2435,17 +2510,17 @@ export class PaperTradingEngine {
         isWinStreak = isWin;
       }
     }
-    
+
     // Update final streak
     if (isWinStreak) {
       consecutiveWins = Math.max(consecutiveWins, currentStreak);
     } else {
       consecutiveLosses = Math.max(consecutiveLosses, currentStreak);
     }
-    
+
     // Risk-Reward Ratio
     const riskRewardRatio = averageLoss > 0 ? averageWin / averageLoss : 0;
-    
+
     // Volatility (standard deviation of returns)
     const volatility = stdDev;
 
@@ -2498,34 +2573,34 @@ export class PaperTradingEngine {
     const trades = state.trades;
     const now = Date.now();
     const sessionDuration = now - state.startTime;
-    
+
     // Calculate average execution time (simplified - would need actual tracking)
     const avgExecutionTime = 150; // ms (placeholder)
-    
+
     // Calculate slippage statistics
     const slippages = trades.map(t => {
       const expectedPrice = t.marketPrice;
       const actualPrice = t.executionPrice;
       return Math.abs((actualPrice - expectedPrice) / expectedPrice) * 100;
     });
-    
+
     const avgSlippage = slippages.length > 0
       ? slippages.reduce((sum, s) => sum + s, 0) / slippages.length
       : 0;
-    
+
     const maxSlippage = slippages.length > 0 ? Math.max(...slippages) : 0;
-    
+
     // Failed trades (would need actual tracking)
     const failedTrades = 0; // Placeholder
-    
+
     // Success rate
     const successRate = trades.length > 0
       ? ((trades.length - failedTrades) / trades.length) * 100
       : 100;
-    
+
     // API response times (placeholder)
     const avgApiResponseTime = 250; // ms
-    
+
     const executionStats = {
       sessionId,
       timestamp: now,
@@ -2571,7 +2646,7 @@ export class PaperTradingEngine {
       state.config.initialBalanceSOL,
       state.config.initialBalanceUSDC
     );
-    
+
     // Restore portfolio state
     for (const trade of state.trades) {
       portfolio.addTrade(trade);
@@ -2591,45 +2666,45 @@ export class PaperTradingEngine {
     const currentPrice = marketData.price;
     const currentPriceUSD = marketData.priceUSD;
     const solPriceUSD = marketData.solPrice;
-    
+
     // Calculate days held
     const positionAge = Date.now() - position.firstTradeTimestamp;
     const daysHeld = positionAge / (1000 * 60 * 60 * 24);
-    
+
     // Mark-to-market value
     const markToMarketValue = position.amount * currentPrice;
     const markToMarketValueUSD = markToMarketValue * solPriceUSD;
-    
+
     // Calculate cost basis
     const costBasis = position.totalInvestedSOL;
     const realizedPnL = 0; // Position doesn't track realized P&L, need to calculate from trades
-    
+
     const positionUpdate = {
       sessionId,
       tokenAddress,
       timestamp: Date.now(),
-      
+
       currentMarketValue: markToMarketValue,
       currentMarketValueUSD: markToMarketValueUSD,
-      
+
       unrealizedPnL: position.unrealizedPnL,
       unrealizedPnLUSD: position.unrealizedPnL * solPriceUSD,
       unrealizedPnLPercentage: position.unrealizedPnLPercentage,
-      
+
       realizedPnL,
       realizedPnLUSD: realizedPnL * solPriceUSD,
-      
+
       averageEntryPrice: position.averageEntryPrice,
       currentPrice,
       currentPriceUSD,
-      
+
       positionSize: position.amount,
       costBasis,
-      
+
       daysHeld,
       markToMarketValue,
       markToMarketValueUSD,
-      
+
       priceChange: ((currentPrice - position.averageEntryPrice) / position.averageEntryPrice) * 100,
     };
 
@@ -2662,27 +2737,27 @@ export class PaperTradingEngine {
     const now = Date.now();
     const sessionDuration = now - state.startTime;
     const trades = state.trades;
-    
+
     // Total volume
     const totalVolumeUSD = trades.reduce((sum, t) => {
       return sum + (t.amountSOL * t.solPriceUSD);
     }, 0);
-    
+
     // Average trade size
-    const avgTradeSize = trades.length > 0 
-      ? totalVolumeUSD / trades.length 
+    const avgTradeSize = trades.length > 0
+      ? totalVolumeUSD / trades.length
       : 0;
-    
+
     // Trading frequency
     const tradesPerHour = (trades.length / (sessionDuration / 3600000)) || 0;
-    
+
     // Busiest trading hour (simplified)
     const hourlyTrades = new Map<number, number>();
     trades.forEach(trade => {
       const hour = new Date(trade.timestamp).getHours();
       hourlyTrades.set(hour, (hourlyTrades.get(hour) || 0) + 1);
     });
-    
+
     let busiestHour = 0;
     let maxTradesInHour = 0;
     hourlyTrades.forEach((count, hour) => {
@@ -2691,20 +2766,20 @@ export class PaperTradingEngine {
         busiestHour = hour;
       }
     });
-    
+
     // Portfolio turnover (total traded / average portfolio value)
     const avgPortfolioValue = state.metrics.totalValueUSD;
-    const portfolioTurnover = avgPortfolioValue > 0 
-      ? (totalVolumeUSD / avgPortfolioValue) * 100 
+    const portfolioTurnover = avgPortfolioValue > 0
+      ? (totalVolumeUSD / avgPortfolioValue) * 100
       : 0;
-    
+
     // Capital utilization
     const initialCapitalUSD = state.config.initialBalanceSOL * 200 + state.config.initialBalanceUSDC;
     const currentCashUSD = state.portfolio.balanceSOL * 200 + state.portfolio.balanceUSDC;
     const capitalUtilization = initialCapitalUSD > 0
       ? ((initialCapitalUSD - currentCashUSD) / initialCapitalUSD) * 100
       : 0;
-    
+
     // Idle time (time without trades)
     let idleTime = 0;
     for (let i = 1; i < trades.length; i++) {
@@ -2732,12 +2807,12 @@ export class PaperTradingEngine {
       availableCash: currentCashUSD,
       idleTime,
       idleTimePercentage,
-      
+
       // Additional metrics
       buyTrades: trades.filter(t => t.type === 'buy').length,
       sellTrades: trades.filter(t => t.type === 'sell').length,
-      avgTimeBetweenTrades: trades.length > 1 
-        ? sessionDuration / (trades.length - 1) 
+      avgTimeBetweenTrades: trades.length > 1
+        ? sessionDuration / (trades.length - 1)
         : 0,
     };
 
@@ -2767,7 +2842,7 @@ export class PaperTradingEngine {
     sessionStats: NodeJS.Timeout;
   } {
     console.log(`🎯 [Comprehensive Monitoring] Started for session ${sessionId}`);
-    
+
     return {
       riskMetrics: this.startRiskMetricsEmission(sessionId),
       executionStats: this.startExecutionStatsEmission(sessionId),

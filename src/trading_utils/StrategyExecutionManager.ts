@@ -263,7 +263,7 @@ export class StrategyExecutionManager {
       console.log(`[StrategyExecutionManager] Strategy tokenAddress: ${(strategy as any).tokenAddress}`);
       console.log(`[StrategyExecutionManager] Strategy variables.tokenAddress: ${strategy.variables?.tokenAddress}`);
       console.log(`[StrategyExecutionManager] Is SOL address: ${tokenAddress === 'So11111111111111111111111111111111111111112'}`);
-      
+
       // CRITICAL: Validate token address exists and is not SOL for pump.fun strategies
       if (!tokenAddress || tokenAddress === 'So11111111111111111111111111111111111111112') {
         if (strategy.name.includes('PumpFun') || strategy.name.includes('Reactive') || strategy.name.includes('Mirror')) {
@@ -272,7 +272,7 @@ export class StrategyExecutionManager {
           throw new Error(error);
         }
       }
-      
+
       // Normalize to lowercase for WebSocket matching (CRITICAL for event detection)
       if (tokenAddress && tokenAddress !== 'So11111111111111111111111111111111111111112') {
         const originalAddress = tokenAddress;
@@ -294,36 +294,91 @@ export class StrategyExecutionManager {
       console.log(`🔍 [StrategyExecutionManager] Strategy variables:`, strategy.variables);
       console.log(`🔍 [StrategyExecutionManager] ===== SUPPLY DEBUG END =====`);
 
+      // Extract initial token balance (0 for buy strategies, supply value for sell strategies)
+      const initialTokenBalance = isSellStrategy
+        ? this.extractInitialTokenBalance(strategy)
+        : 0;
+
+      // CRITICAL NEW VALIDATION: Fail fast for sell strategies without supply
+      if (isSellStrategy && (!initialTokenBalance || initialTokenBalance <= 0)) {
+        const errorMsg =
+          `❌ CRITICAL ERROR: Cannot start SELL strategy without valid token supply!\n` +
+          `\n` +
+          `User must specify their initial token balance, for example:\n` +
+          `  - "I have 14 million tokens"\n` +
+          `  - "I own 500,000 tokens"\n` +
+          `  - "My supply is 2.5M"\n` +
+          `\n` +
+          `Received initial token balance: ${initialTokenBalance}\n` +
+          `\n` +
+          `This is a configuration error - strategy creation should have extracted supply from user message.`;
+
+        console.error(`\n${'='.repeat(80)}`);
+        console.error(errorMsg);
+        console.error(`\n📋 Strategy Debug Info:`);
+        console.error(JSON.stringify({
+          strategyId: strategy.id,
+          strategyName: strategy.name,
+          'strategy.initialTokenBalance': (strategy as any).initialTokenBalance,
+          'strategy.config.supply': (strategy as any).config?.supply,
+          'strategy.variables.supply': (strategy.variables as any)?.supply,
+          isSellStrategy,
+          extractedBalance: initialTokenBalance,
+        }, null, 2));
+        console.error(`${'='.repeat(80)}\n`);
+        throw new Error(errorMsg);
+      }
+
+      console.log(`💰💰💰 [startStrategy] Initial token balance: ${initialTokenBalance.toLocaleString()} tokens`);
+      console.log(`💰 [startStrategy] Strategy type: ${isSellStrategy ? 'SELL (needs tokens)' : 'BUY (starts with SOL)'}`);
+
+      // Build paper trading config with VALIDATED values
       const initialConfig: any = {
         initialBalanceSOL: initialBalanceSOL || 10,
         initialBalanceUSDC: 0,
-        // For SELL strategies, get initial token balance from multiple sources with proper priority
-        initialBalanceTokens: isSellStrategy 
-          ? this.extractInitialTokenBalance(strategy)
-          : 0,
-        tokenAddress: tokenAddress, // Pass the token address to the session
+        initialBalanceTokens: initialTokenBalance,
+        tokenAddress: tokenAddress,
+        initialTokenBalance: initialTokenBalance,
+        strategySide: isSellStrategy ? 'sell' : 'buy',
       };
 
-      // Pass through initialTokenBalance to config for auto-init logic in PaperTradingEngine
-      if (isSellStrategy) {
-        const supplyValue = (strategy as any).initialTokenBalance || (strategy as any).config?.supply || (strategy.variables as any)?.supply || (strategy.variables as any)?.initialSupply || 100000;
-        initialConfig.initialTokenBalance = supplyValue;
-        console.log(`✅✅✅ [StrategyExecutionManager] Setting initialTokenBalance for SELL strategy: ${supplyValue.toLocaleString()}`);
-        console.log(`✅ [StrategyExecutionManager] Supply came from: ${
-          (strategy as any).initialTokenBalance ? 'strategy.initialTokenBalance' :
-          (strategy as any).config?.supply ? 'strategy.config.supply' :
-          (strategy.variables as any)?.supply ? 'strategy.variables.supply' :
-          (strategy.variables as any)?.initialSupply ? 'strategy.variables.initialSupply' :
-          'DEFAULT (100000)'
-        }`);
-      }
+      console.log(`✅ [startStrategy] Paper trading config prepared:`, {
+        initialBalanceSOL: initialConfig.initialBalanceSOL,
+        initialBalanceTokens: initialConfig.initialBalanceTokens,
+        initialTokenBalance: initialConfig.initialTokenBalance,
+        tokenAddress: initialConfig.tokenAddress,
+        strategySide: initialConfig.strategySide,
+      });
+
+      // const initialConfig: any = {
+      //   initialBalanceSOL: initialBalanceSOL || 10,
+      //   initialBalanceUSDC: 0,
+      //   // For SELL strategies, get initial token balance from multiple sources with proper priority
+      //   initialBalanceTokens: isSellStrategy
+      //     ? this.extractInitialTokenBalance(strategy)
+      //     : 0,
+      //   tokenAddress: tokenAddress, // Pass the token address to the session
+      // };
+
+      // // Pass through initialTokenBalance to config for auto-init logic in PaperTradingEngine
+      // if (isSellStrategy) {
+      //   const supplyValue = (strategy as any).initialTokenBalance || (strategy as any).config?.supply || (strategy.variables as any)?.supply || (strategy.variables as any)?.initialSupply || 100000;
+      //   initialConfig.initialTokenBalance = supplyValue;
+      //   console.log(`✅✅✅ [StrategyExecutionManager] Setting initialTokenBalance for SELL strategy: ${supplyValue.toLocaleString()}`);
+      //   console.log(`✅ [StrategyExecutionManager] Supply came from: ${(strategy as any).initialTokenBalance ? 'strategy.initialTokenBalance' :
+      //       (strategy as any).config?.supply ? 'strategy.config.supply' :
+      //         (strategy.variables as any)?.supply ? 'strategy.variables.supply' :
+      //           (strategy.variables as any)?.initialSupply ? 'strategy.variables.initialSupply' :
+      //             'DEFAULT (100000)'
+      //     }`);
+      // }
 
       // Check if existing session is provided and actually exists
       if (existingPaperSessionId) {
         const sessionExists = paperTradingEngine.getSession(existingPaperSessionId);
         if (sessionExists) {
           paperTradingSessionId = existingPaperSessionId;
-          
+
           // CRITICAL FIX: Update session config with strategy-specific settings (like initialTokenBalance)
           // The session may have been created with default config, but now we have strategy-specific requirements
           console.log(`🔧🔧🔧 [StrategyExecutionManager] Updating existing session config with strategy settings`);
@@ -334,7 +389,7 @@ export class StrategyExecutionManager {
           } else {
             console.log(`❌❌❌ [StrategyExecutionManager] Failed to update session config!`);
           }
-          
+
           awsLogger.info('✅ Using existing paper trading session (config updated)', {
             metadata: { strategyId, runningId, sessionId: paperTradingSessionId, initialTokenBalance: initialConfig.initialTokenBalance }
           });
@@ -1338,27 +1393,27 @@ export class StrategyExecutionManager {
           });
           const state = result.context.variables.state || {};
           const context = result.context;
-          
+
           // Extract metrics with proper fallbacks
           const metrics = state.metrics || {};
           const portfolio = state.portfolio || {};
-          
+
           const actualTradeCount = (state.trades && Array.isArray(state.trades) ? state.trades.length : (metrics.totalTrades || context.variables._globalTradeCount || 0));
-          
+
           const metricUpdate = {
             strategyId: execution.strategyId,
             executionId: execution.id,
             runningId: execution.id, // Include runningId for UI correlation
             timestamp: Date.now(),
             executionCount: actualTradeCount, // ACTUAL trade count for UI (not loop iterations)
-            
+
             // Trade counts (CRITICAL: Use paper trading metrics for actual trade count)
             trades: {
               total: actualTradeCount,
               buy: metrics.buyTrades || context.variables._buyTradeCount || 0,
               sell: metrics.sellTrades || context.variables._sellTradeCount || 0,
             },
-            
+
             // Performance metrics
             performance: {
               totalPnL: metrics.totalPnLUSD || metrics.totalPnL || 0,
@@ -1376,7 +1431,7 @@ export class StrategyExecutionManager {
               winningTrades: metrics.winningTrades || 0,
               losingTrades: metrics.losingTrades || 0,
             },
-            
+
             // Portfolio balances
             portfolio: {
               balanceSOL: portfolio.balanceSOL || 0,
@@ -1384,15 +1439,15 @@ export class StrategyExecutionManager {
               balanceTokens: portfolio.balanceTokens || 0,
               totalValueSOL: portfolio.totalValueSOL || 0,
               totalValueUSD: portfolio.totalValueUSD || 0,
-              positions: Array.isArray(portfolio.positions) 
-                ? portfolio.positions 
+              positions: Array.isArray(portfolio.positions)
+                ? portfolio.positions
                 : (portfolio.positions instanceof Map ? Array.from(portfolio.positions.values()) : []),
             }
           };
-          
+
           // Emit metrics update for both generic strategy tracking and paper trading UI
           this.io.emit('strategy_metrics_update', metricUpdate);
-          
+
           // Also emit to paper trading listeners if this is a paper trading strategy
           if (execution.paperTradingSessionId) {
             this.io.emit('paper:metrics:update', {
@@ -1408,7 +1463,7 @@ export class StrategyExecutionManager {
               timestamp: metricUpdate.timestamp
             });
           }
-          
+
           console.log(`📈 [METRICS UPDATE] Broadcasted comprehensive metrics for ${execution.id}:`, {
             trades: metricUpdate.trades.total,
             pnl: metricUpdate.performance.totalPnLUSD.toFixed(2),
@@ -1892,28 +1947,60 @@ export class StrategyExecutionManager {
   }
 
   /**
-   * Extract initial token balance with intelligent fallback priority
-   * Priority: config.supply > initialTokenBalance > variables.supply > 100K fallback
-   */
+ * Extract initial token balance with intelligent fallback priority
+ * Priority: 
+ *   1. strategy.initialTokenBalance (top-level property)
+ *   2. strategy.config.supply
+ *   3. strategy.config.initialTokenBalance  
+ *   4. strategy.variables.supply
+ *   5. strategy.variables.initialSupply
+ * 
+ * CRITICAL: NO hardcoded fallback - return 0 if not found
+ */
   private extractInitialTokenBalance(strategy: any): number {
     const sources = [
-      { name: 'config.supply', value: strategy.config?.supply },
-      { name: 'initialTokenBalance', value: strategy.initialTokenBalance },
-      { name: 'variables.supply', value: (strategy.variables as any)?.supply },
-      { name: 'variables.initialSupply', value: (strategy.variables as any)?.initialSupply },
+      { name: 'strategy.initialTokenBalance', value: strategy.initialTokenBalance },
+      { name: 'strategy.config.supply', value: strategy.config?.supply },
+      { name: 'strategy.config.initialTokenBalance', value: strategy.config?.initialTokenBalance },
+      { name: 'strategy.variables.supply', value: (strategy.variables as any)?.supply },
+      { name: 'strategy.variables.initialSupply', value: (strategy.variables as any)?.initialSupply },
     ];
-    
-    console.log(`🔍 [extractInitialTokenBalance] Checking token balance sources:`);
+
+    console.log(`🔍🔍🔍 [extractInitialTokenBalance] === SUPPLY EXTRACTION DEBUG START ===`);
+    console.log(`🔍 [extractInitialTokenBalance] Checking ${sources.length} possible supply locations:`);
+
     for (const source of sources) {
-      console.log(`   ${source.name}: ${source.value || 'undefined'}`);
-      if (source.value && source.value > 0) {
-        console.log(`✅ [extractInitialTokenBalance] Using ${source.name} = ${source.value.toLocaleString()} tokens`);
-        return source.value;
+      const value = source.value;
+      const valueDisplay = value !== undefined && value !== null
+        ? (typeof value === 'number' ? value.toLocaleString() : `${value} (type: ${typeof value})`)
+        : 'undefined/null';
+
+      console.log(`   ${source.name}: ${valueDisplay}`);
+
+      // Accept any positive number
+      if (value !== undefined && value !== null && typeof value === 'number' && value > 0) {
+        console.log(`✅✅✅ [extractInitialTokenBalance] FOUND! Using ${source.name} = ${value.toLocaleString()} tokens`);
+        console.log(`🔍🔍🔍 [extractInitialTokenBalance] === SUPPLY EXTRACTION DEBUG END ===\n`);
+        return value;
       }
     }
-    
-    console.warn(`⚠️ [extractInitialTokenBalance] No supply found, using fallback: 100,000 tokens`);
-    return 100000;
+
+    // CRITICAL: NO hardcoded fallback!
+    console.error(`\n❌❌❌ [extractInitialTokenBalance] === CRITICAL ERROR ===`);
+    console.error(`❌ NO VALID SUPPLY FOUND IN ANY OF ${sources.length} LOCATIONS!`);
+    console.error(`❌ This indicates a configuration error in strategy creation`);
+    console.error(`\n❌ Full strategy object for debugging:`);
+    console.error(JSON.stringify({
+      'strategy.id': strategy.id,
+      'strategy.name': strategy.name,
+      'strategy.initialTokenBalance': strategy.initialTokenBalance,
+      'strategy.config': strategy.config,
+      'strategy.variables': strategy.variables,
+    }, null, 2));
+    console.error(`❌❌❌ [extractInitialTokenBalance] === END CRITICAL ERROR ===\n`);
+
+    // Return 0 to indicate failure
+    return 0;
   }
 }
 
