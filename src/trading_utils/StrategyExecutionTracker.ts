@@ -5,6 +5,7 @@
 
 import { awsLogger } from '../aws/logger';
 import { getTokenPriceUSD, getSolPriceUSD } from './TokenUtils';
+import { marketDataProvider } from './paper-trading/MarketDataProvider';
 
 // Import broadcaster - will be initialized by server
 let performanceBroadcaster: any = null;
@@ -79,6 +80,9 @@ export interface StrategyPerformance {
   // Token info
   tokenAddress?: string;
   tokenSymbol?: string;
+  
+  // Price caching
+  lastKnownTokenPrice?: number;  // Cache for fallback when price API fails
 }
 
 export class StrategyExecutionTracker {
@@ -124,6 +128,7 @@ export class StrategyExecutionTracker {
       dailyROI: 0,
       tokenAddress,
       tokenSymbol,
+      lastKnownTokenPrice: undefined,  // Will be set on first price fetch
     };
 
     this.performances.set(strategyId, performance);
@@ -218,32 +223,80 @@ export class StrategyExecutionTracker {
       performance.realizedProfitUSD = performance.realizedProfitSOL * latestTrade.solPriceUSD;
     }
 
-    // Calculate unrealized profit (current token holdings)
+    // Calculate unrealized profit (current token holdings) with price fallback
     if (performance.currentTokenBalance > 0 && performance.tokenAddress) {
+      // Calculate average entry price from total invested and total tokens bought
+      const totalTokensBought = performance.trades
+        .filter(t => t.type === 'buy')
+        .reduce((sum, t) => sum + t.amountTokens, 0);
+      const averageEntryPrice = totalTokensBought > 0 
+        ? performance.totalInvestedSOL / totalTokensBought 
+        : 0;
+      
+      // Start with fallback: use last known price or average entry price
+      let currentPrice = performance.lastKnownTokenPrice || averageEntryPrice;
+      let priceSource = performance.lastKnownTokenPrice ? 'cached' : 'entry_price';
+      
       try {
-        // getTokenPriceUSD returns the price for the configured token
-        const tokenPriceData = await getTokenPriceUSD();
-        const currentValue = performance.currentTokenBalance * tokenPriceData.price;
-        const investedInCurrentHoldings = performance.totalInvestedSOL - performance.totalReturnedSOL;
-        const costBasis = investedInCurrentHoldings * latestTrade.solPriceUSD;
+        // Fetch token price in SOL (not USD!)
+        const priceData = await marketDataProvider.fetchTokenPrice(performance.tokenAddress);
         
-        performance.unrealizedProfitUSD = currentValue - costBasis;
-        performance.unrealizedProfitSOL = performance.unrealizedProfitUSD / latestTrade.solPriceUSD;
+        if (priceData?.price && priceData.price > 0) {
+          currentPrice = priceData.price; // This is in SOL per token
+          performance.lastKnownTokenPrice = currentPrice; // Cache for next time
+          priceSource = 'live';
+        }
       } catch (error) {
-        awsLogger.warn('Failed to calculate unrealized profit', { 
-          metadata: { strategyId: performance.strategyId, error } 
+        console.warn(`⚠️ [Unrealized P&L] Using ${priceSource} price for ${performance.tokenSymbol || 'token'}: ${currentPrice.toFixed(10)} SOL`);
+        awsLogger.warn('Failed to fetch current price, using fallback', { 
+          metadata: { 
+            strategyId: performance.strategyId, 
+            fallbackPrice: currentPrice,
+            priceSource,
+            error 
+          } 
         });
       }
+      
+      // Calculate in SOL first (all prices are in SOL per token)
+      const costBasisSOL = performance.currentTokenBalance * averageEntryPrice;
+      const currentValueSOL = performance.currentTokenBalance * currentPrice;
+      
+      // Calculate P&L in SOL, then convert to USD
+      performance.unrealizedProfitSOL = currentValueSOL - costBasisSOL;
+      performance.unrealizedProfitUSD = performance.unrealizedProfitSOL * latestTrade.solPriceUSD;
+      
+      console.log(`💎 [Unrealized P&L] ${performance.tokenSymbol || 'Token'}:`, {
+        tokens: performance.currentTokenBalance.toFixed(2),
+        avgEntrySOL: averageEntryPrice.toFixed(10),
+        currentPriceSOL: currentPrice.toFixed(10),
+        priceSource,
+        costBasisSOL: costBasisSOL.toFixed(6),
+        currentValueSOL: currentValueSOL.toFixed(6),
+        unrealizedSOL: performance.unrealizedProfitSOL.toFixed(6),
+        unrealizedUSD: performance.unrealizedProfitUSD.toFixed(2),
+        solPriceUSD: latestTrade.solPriceUSD.toFixed(2)
+      });
     } else {
       performance.unrealizedProfitSOL = 0;
       performance.unrealizedProfitUSD = 0;
     }
 
-    // Calculate total profit (subtract fees)
+    // Calculate total profit
+    // IMPORTANT: Fees are already deducted in realized P&L from individual trades
+    // Do NOT subtract fees again here to avoid double-counting
     performance.totalProfitSOL = 
-      performance.realizedProfitSOL + performance.unrealizedProfitSOL - performance.totalFeesSOL;
+      performance.realizedProfitSOL + performance.unrealizedProfitSOL;
     performance.totalProfitUSD = 
-      performance.realizedProfitUSD + performance.unrealizedProfitUSD - performance.totalFeesUSD;
+      performance.realizedProfitUSD + performance.unrealizedProfitUSD;
+
+    console.log('💰 [P&L Breakdown]:', {
+      realizedSOL: performance.realizedProfitSOL.toFixed(6),
+      unrealizedSOL: performance.unrealizedProfitSOL.toFixed(6),
+      totalProfitSOL: performance.totalProfitSOL.toFixed(6),
+      totalFeesSOL: performance.totalFeesSOL.toFixed(6),
+      note: 'Fees already included in realized P&L from trades'
+    });
 
     // Calculate profit percentage
     if (performance.totalInvestedSOL > 0) {
@@ -251,15 +304,45 @@ export class StrategyExecutionTracker {
         (performance.totalProfitSOL / performance.totalInvestedSOL) * 100;
     }
 
-    // Calculate ROI
+    // Calculate ROI: (Current Portfolio Value - Initial Investment) / Initial Investment * 100
+    // Current Portfolio Value = Cash Balance + Current Value of Open Positions
     if (performance.initialBalanceSOL > 0) {
-      performance.roi = (performance.totalProfitSOL / performance.initialBalanceSOL) * 100;
+      // Calculate current token value at market price
+      let currentTokenValueSOL = 0;
+      if (performance.currentTokenBalance > 0) {
+        const totalTokensBought = performance.trades
+          .filter(t => t.type === 'buy')
+          .reduce((sum, t) => sum + t.amountTokens, 0);
+        const averageEntryPrice = totalTokensBought > 0 
+          ? performance.totalInvestedSOL / totalTokensBought 
+          : 0;
+        const tokenPrice = performance.lastKnownTokenPrice || averageEntryPrice;
+        currentTokenValueSOL = performance.currentTokenBalance * tokenPrice;
+      }
+      
+      // Total current portfolio value in SOL
+      const currentPortfolioValue = performance.currentBalanceSOL + currentTokenValueSOL;
+      
+      // ROI = (Current Value - Initial Value) / Initial Value * 100
+      performance.roi = ((currentPortfolioValue - performance.initialBalanceSOL) / performance.initialBalanceSOL) * 100;
       
       // Calculate daily ROI
       const durationDays = (Date.now() - performance.startTime) / (1000 * 60 * 60 * 24);
       if (durationDays > 0) {
         performance.dailyROI = performance.roi / durationDays;
       }
+      
+      console.log('📊 [ROI Calculation]:', {
+        initialBalanceSOL: performance.initialBalanceSOL.toFixed(4),
+        currentBalanceSOL: performance.currentBalanceSOL.toFixed(4),
+        currentTokenBalance: performance.currentTokenBalance.toFixed(2),
+        tokenPrice: (performance.lastKnownTokenPrice || 0).toFixed(8),
+        currentTokenValueSOL: currentTokenValueSOL.toFixed(4),
+        currentPortfolioValue: currentPortfolioValue.toFixed(4),
+        changeInValue: (currentPortfolioValue - performance.initialBalanceSOL).toFixed(4),
+        roi: performance.roi.toFixed(2) + '%',
+        calculation: `((${currentPortfolioValue.toFixed(4)} - ${performance.initialBalanceSOL.toFixed(4)}) / ${performance.initialBalanceSOL.toFixed(4)}) * 100`
+      });
     }
 
     // Calculate average execution time
@@ -272,6 +355,47 @@ export class StrategyExecutionTracker {
         performance.averageExecutionTime = 
           times.reduce((a, b) => a + b, 0) / times.length;
       }
+    }
+    
+    // Validate calculations for consistency
+    this.validatePerformanceMetrics(performance);
+  }
+  
+  /**
+   * Validate performance metrics for consistency
+   */
+  private validatePerformanceMetrics(perf: StrategyPerformance): void {
+    // Check 1: Total profit should equal realized + unrealized
+    const expectedTotal = perf.realizedProfitSOL + perf.unrealizedProfitSOL;
+    if (Math.abs(perf.totalProfitSOL - expectedTotal) > 0.000001) {
+      console.error('❌ [VALIDATION] Total P&L mismatch:', {
+        expected: expectedTotal.toFixed(6),
+        actual: perf.totalProfitSOL.toFixed(6),
+        difference: (perf.totalProfitSOL - expectedTotal).toFixed(6)
+      });
+    }
+    
+    // Check 2: ROI should reflect change in portfolio value
+    let currentTokenValueSOL = 0;
+    if (perf.currentTokenBalance > 0) {
+      const totalTokensBought = perf.trades
+        .filter(t => t.type === 'buy')
+        .reduce((sum, t) => sum + t.amountTokens, 0);
+      const averageEntryPrice = totalTokensBought > 0 
+        ? perf.totalInvestedSOL / totalTokensBought 
+        : 0;
+      const tokenPrice = perf.lastKnownTokenPrice || averageEntryPrice;
+      currentTokenValueSOL = perf.currentTokenBalance * tokenPrice;
+    }
+    const currentValue = perf.currentBalanceSOL + currentTokenValueSOL;
+    const expectedROI = ((currentValue - perf.initialBalanceSOL) / perf.initialBalanceSOL) * 100;
+    
+    if (Math.abs(perf.roi - expectedROI) > 0.01) {
+      console.error('❌ [VALIDATION] ROI mismatch:', {
+        expected: expectedROI.toFixed(2) + '%',
+        actual: perf.roi.toFixed(2) + '%',
+        difference: (perf.roi - expectedROI).toFixed(2) + '%'
+      });
     }
   }
 
