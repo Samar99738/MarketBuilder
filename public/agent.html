@@ -404,7 +404,7 @@
                                 </div>
                                 <div class="metric-card">
                                     <div class="metric-label">ROI</div>
-                                    <div class="metric-value" id="roi">+0.00%</div>
+                                    <div class="metric-value" id="strategyRoi">+0.00%</div>
                                 </div>
                                 <div class="metric-card">
                                     <div class="metric-label">WIN RATE</div>
@@ -2321,6 +2321,8 @@
 
             /**
              * Update paper trading metrics display
+             * CRITICAL: This is the SINGLE SOURCE OF TRUTH for all metrics
+             * Both left panel (sidebar) and right panel (strategy execution) use this function
              */
             function updatePaperTradingMetrics(data) {
                 // Handle nested response structure: data.data.session or direct data
@@ -2328,13 +2330,11 @@
                 const metrics = session.metrics || data;
                 const portfolio = session.portfolio || {};
 
-                console.log('📊 updatePaperTradingMetrics called with metrics:', {
+                console.log('📊 [SINGLE SOURCE] updatePaperTradingMetrics called with metrics:', {
                     totalTrades: metrics.totalTrades,
+                    roi: metrics.roi,
                     winRate: metrics.winRate,
-                    profitFactor: metrics.profitFactor,
-                    sharpeRatio: metrics.sharpeRatio,
-                    winningTrades: metrics.winningTrades,
-                    losingTrades: metrics.losingTrades
+                    profitFactor: metrics.profitFactor
                 });
 
                 // Update balance - check portfolio first, then metrics
@@ -2373,35 +2373,12 @@
                     paperBalanceElement.textContent = `${balanceSOL.toFixed(4)} SOL / ${balanceUSDC.toFixed(2)} USDC`;
                 }
 
-                // Update P&L - Use USD values
-                const totalPnL = metrics.totalPnLUSD || metrics.totalPnL || 0;
-                const pnlElement = document.getElementById('paperPnL');
-                if (pnlElement) {
-                    pnlElement.textContent = `${totalPnL >= 0 ? '+' : ''}${totalPnL.toFixed(2)} USD`;
-                    pnlElement.className = `metric-value ${totalPnL >= 0 ? 'profit' : 'loss'}`;
-                }
-
-                // Update ROI - Use roi (total value change) not totalPnLPercentage (realized only)
-                const roi = metrics.roi || metrics.totalPnLPercentage || 0;
-                const roiElement = document.getElementById('paperROI');
-                if (roiElement) {
-                    roiElement.textContent = `${roi >= 0 ? '+' : ''}${roi.toFixed(2)}%`;
-                    roiElement.className = `metric-value ${roi >= 0 ? 'profit' : 'loss'}`;
-                }
-
-                // Update trades
-                const totalTrades = metrics.totalTrades || 0;
-                const winRate = metrics.winRate || 0;
-                const paperTradesElement = document.getElementById('paperTrades');
-                if (paperTradesElement) {
-                    paperTradesElement.textContent = `${totalTrades} (${winRate.toFixed(1)}% win)`;
-                }
-
-                // CRITICAL FIX: Also update RIGHT panel and Advanced Metrics with the same data!
-                updateLiveMetrics({
+                // CRITICAL: Create unified metrics object for BOTH panels
+                // This is the SINGLE SOURCE OF TRUTH for all ROI calculations
+                const unifiedMetrics = {
                     executions: metrics.totalTrades || 0,
                     pnl: metrics.totalPnLUSD || metrics.totalPnL || 0,
-                    roi: metrics.roi || metrics.totalPnLPercentage || 0,
+                    roi: metrics.roi || metrics.totalPnLPercentage || 0, // SINGLE ROI SOURCE
                     winRate: metrics.winRate || 0,
                     profitFactor: metrics.profitFactor || 0,
                     sharpeRatio: metrics.sharpeRatio || 0,
@@ -2414,7 +2391,37 @@
                     executionsPerMin: metrics.duration > 0
                         ? (metrics.totalTrades / (metrics.duration / 60000))
                         : 0
+                };
+
+                console.log('✅ [SINGLE SOURCE] Unified metrics:', {
+                    roi: unifiedMetrics.roi,
+                    pnl: unifiedMetrics.pnl,
+                    executions: unifiedMetrics.executions
                 });
+
+                // Update LEFT PANEL (sidebar) P&L
+                const pnlElement = document.getElementById('total-pnl');
+                if (pnlElement) {
+                    pnlElement.textContent = `${unifiedMetrics.pnl >= 0 ? '+' : ''}$${unifiedMetrics.pnl.toFixed(2)}`;
+                    pnlElement.className = unifiedMetrics.pnl >= 0 ? 'positive' : 'negative';
+                }
+
+                // Update ROI in sidebar only
+                const roiElement = document.getElementById('roi');
+                if (roiElement) {
+                    roiElement.textContent = `${unifiedMetrics.roi >= 0 ? '+' : ''}${unifiedMetrics.roi.toFixed(2)}%`;
+                    roiElement.className = unifiedMetrics.roi >= 0 ? 'positive' : 'negative';
+                }
+
+                // Update trades
+                const paperTradesElement = document.getElementById('paperTrades');
+                if (paperTradesElement) {
+                    paperTradesElement.textContent = `${unifiedMetrics.executions} (${unifiedMetrics.winRate.toFixed(1)}% win)`;
+                }
+
+                // CRITICAL: Update RIGHT PANEL with EXACT SAME metrics object
+                // This ensures both panels always show identical values
+                updateLiveMetrics(unifiedMetrics);
             }
 
             /**
@@ -2565,45 +2572,10 @@
                         }
                     }
 
-                    // Store metrics in a single source of truth
-                    const tradeMetrics = {
-                        executions: data.metrics.totalTrades || 0,
-                        pnl: data.metrics.totalPnLUSD || data.metrics.totalPnL || 0,
-                        roi: data.metrics.roi || data.metrics.totalPnLPercentage || 0,
-                        winRate: data.metrics.winRate || 0,
-
-                        // Enhanced metrics
-                        profitFactor: data.metrics.profitFactor || 0,
-                        sharpeRatio: data.metrics.sharpeRatio || 0,
-                        maxDrawdown: data.metrics.maxDrawdown || 0,
-                        averageWin: data.metrics.averageWin || 0,
-                        averageLoss: data.metrics.averageLoss || 0,
-                        winningTrades: data.metrics.winningTrades || 0,
-                        losingTrades: data.metrics.losingTrades || 0,
-                        totalFeesUSD: data.metrics.totalFeesUSD || 0,
-                        executionsPerMin: data.metrics.executionsPerMin || 0,
-                    };
-
-                    console.log('📊 Extracted tradeMetrics for update:', tradeMetrics);
-
-                    // Update RIGHT PANEL with exact same values
-                    updateLiveMetrics(tradeMetrics);
-
-                    // Update LEFT PANEL with the SAME metrics object
+                    // CRITICAL FIX: Use SINGLE updatePaperTradingMetrics() function
+                    // It will update BOTH left and right panels with identical values
+                    console.log('📊 [paper:trade:executed] Calling SINGLE SOURCE updatePaperTradingMetrics');
                     updatePaperTradingMetrics({ metrics: data.metrics });
-
-                    // CRITICAL FIX: Also update Advanced Metrics directly with all available data
-                    updateAdvancedMetrics({
-                        profitFactor: data.metrics.profitFactor || 0,
-                        sharpeRatio: data.metrics.sharpeRatio || 0,
-                        maxDrawdown: data.metrics.maxDrawdown || 0,
-                        averageWin: data.metrics.averageWin || 0,
-                        averageLoss: data.metrics.averageLoss || 0,
-                        executionsPerMin: data.metrics.executionsPerMin || 0,
-                        winningTrades: data.metrics.winningTrades || 0,
-                        losingTrades: data.metrics.losingTrades || 0,
-                        totalFeesUSD: data.metrics.totalFeesUSD || 0
-                    });
 
                     // Add to live trade feed in RIGHT PANEL with enhanced display
                     const tradeForFeed = {
@@ -2661,28 +2633,9 @@
 
             socket.on('paper:metrics:update', (data) => {
                 if (data.sessionId === currentPaperSessionId) {
-                    console.log('📊 paper:metrics:update received:', data.metrics);
+                    console.log('📊 [paper:metrics:update] Calling SINGLE SOURCE updatePaperTradingMetrics');
+                    // CRITICAL: This single call updates BOTH left and right panels
                     updatePaperTradingMetrics(data.metrics);
-
-                    // CRITICAL FIX: Update Advanced Metrics and RIGHT panel from metrics update
-                    if (data.metrics) {
-                        // Update RIGHT panel with correct metrics
-                        updateLiveMetrics({
-                            executions: data.metrics.totalTrades || 0,
-                            pnl: data.metrics.totalPnLUSD || data.metrics.totalPnL || 0,
-                            roi: data.metrics.roi || data.metrics.totalPnLPercentage || 0,
-                            winRate: data.metrics.winRate || 0,
-                            profitFactor: data.metrics.profitFactor || 0,
-                            sharpeRatio: data.metrics.sharpeRatio || 0,
-                            maxDrawdown: data.metrics.maxDrawdown || 0,
-                            averageWin: data.metrics.averageWin || 0,
-                            averageLoss: data.metrics.averageLoss || 0,
-                            winningTrades: data.metrics.winningTrades || 0,
-                            losingTrades: data.metrics.losingTrades || 0,
-                            totalFeesUSD: data.metrics.totalFeesUSD || 0,
-                            executionsPerMin: data.metrics.executionsPerMin || 0
-                        });
-                    }
                 }
             });
 
@@ -2773,13 +2726,10 @@
                     totalValueElement.textContent = '$' + data.totalValueUSD.toFixed(2);
                 }
 
-                // ROI
-                const roiElement = document.getElementById('roi');
-                if (roiElement && data.roi !== undefined) {
-                    const roi = data.roi || 0;
-                    roiElement.textContent = (roi >= 0 ? '+' : '') + roi.toFixed(2) + '%';
-                    roiElement.className = roi >= 0 ? 'positive' : 'negative';
-                }
+                // CRITICAL FIX: Do NOT update ROI from paper:balance:update event
+                // ROI should ONLY be updated via paper:metrics:update -> updatePaperTradingMetrics()
+                // This ensures ROI is calculated consistently using the unified metrics object
+                // and prevents displaying corrupted ROI values from the backend
 
                 // Total P&L
                 const pnlElement = document.getElementById('total-pnl');
@@ -3408,6 +3358,7 @@
             /**
              * Update portfolio metrics only (for simulation updates)
              * Does NOT update execution count to prevent double-counting
+             * CRITICAL: Does NOT update ROI - ROI is only updated via updatePaperTradingMetrics()
              */
             function updatePortfolioMetrics(metrics) {
                 // Update P&L
@@ -3419,18 +3370,13 @@
                     pnlElement.className = `metric-value ${pnlValue >= 0 ? 'profit' : 'loss'}`;
                 }
 
-                // Update ROI
-                const roi = metrics?.roi ?? 0;
-                const roiValue = Number(roi) || 0;
-                const roiElement = document.getElementById('roi');
-                if (roiElement) {
-                    roiElement.textContent = `${roiValue >= 0 ? '+' : ''}${roiValue.toFixed(2)}%`;
-                    roiElement.className = `metric-value ${roiValue >= 0 ? 'profit' : 'loss'}`;
-                }
+                // CRITICAL FIX: Do NOT update ROI from simulation updates
+                // ROI must ONLY be updated via paper:metrics:update -> updatePaperTradingMetrics()
+                // This ensures ROI is calculated consistently from the unified metrics object
+                // and prevents displaying corrupted ROI values from backend simulation snapshots
 
-                console.log('📊 [updatePortfolioMetrics] Updated portfolio metrics (execution count unchanged):', {
-                    pnl: pnlValue,
-                    roi: roiValue
+                console.log('📊 [updatePortfolioMetrics] Updated P&L only (ROI not updated):', {
+                    pnl: pnlValue
                 });
             }
 
@@ -3513,12 +3459,11 @@
                     pnlElement.title = tooltip;
                 }
 
-                // Update ROI with projections
-                const roiEl = document.getElementById('roi');
-                if (roiEl) {
-                    roiEl.textContent = `${roiValue >= 0 ? '+' : ''}${roiValue.toFixed(2)}%`;
-                    roiEl.className = `metric-value ${roiValue >= 0 ? 'profit' : 'loss'}`;
-
+                // Update ROI in strategy execution panel only
+                const strategyRoiElement = document.getElementById('strategyRoi');
+                if (strategyRoiElement) {
+                    strategyRoiElement.textContent = `${roiValue >= 0 ? '+' : ''}${roiValue.toFixed(2)}%`;
+                    strategyRoiElement.className = `metric-value ${roiValue >= 0 ? 'profit' : 'loss'}`;
                     // Add projection tooltip
                     let tooltip = `Current ROI: ${roiValue.toFixed(2)}%`;
                     if (metrics?.projectedMonthlyROI) {
@@ -3530,7 +3475,7 @@
                     if (maxDrawdown < 0) {
                         tooltip += `\nMax Drawdown: ${maxDrawdown.toFixed(2)}%`;
                     }
-                    roiEl.title = tooltip;
+                    strategyRoiElement.title = tooltip;
                 }
 
                 // Update Win Rate with advanced stats
